@@ -55,9 +55,11 @@ def login():
                 st.info("Account setup is required on the server before sign-in is available.")
 
 
-@st.cache_data(show_spinner=False, max_entries=30)
+@st.cache_resource(show_spinner=False, max_entries=1)
 def read_table(path, modified):
-    return pd.read_parquet(path)
+    # Arrow-backed strings avoid expanding the largest table into hundreds of MB.
+    # Callers create their own selection before changing any data.
+    return pd.read_parquet(path, dtype_backend="pyarrow")
 
 
 def snapshot():
@@ -108,7 +110,7 @@ def admin_panel(user):
             try:
                 with st.spinner("Extracting and validating snapshot…"):
                     result = extract(source, ROOT)
-                st.cache_data.clear()
+                st.cache_resource.clear()
                 st.success(f"Imported {result['tables']} tables and {result['pages']} pages.")
             except Exception:
                 st.error("Import failed. The current snapshot was retained. Check that the PBIX contains an embedded data model.")
@@ -125,7 +127,7 @@ def filters(frame, table):
         selected = st.multiselect("Choose filter fields", available, key=f"fields_{table}")
         for col in selected:
             series = frame[col]
-            if pd.api.types.is_datetime64_any_dtype(series):
+            if pd.api.types.is_datetime64_any_dtype(series) or str(series.dtype).startswith("timestamp["):
                 valid = dates(series).dropna()
                 if len(valid):
                     lower, upper = valid.min().date(), valid.max().date()
