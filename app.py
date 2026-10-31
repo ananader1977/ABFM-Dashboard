@@ -160,7 +160,20 @@ def metric_cards(metrics):
 def source_charts(page, frame, table):
     supported = {"barChart", "clusteredBarChart", "stackedBarChart", "columnChart", "clusteredColumnChart", "stackedColumnChart", "hundredPercentStackedBarChart", "hundredPercentStackedColumnChart", "lineChart", "areaChart", "pieChart", "donutChart", "card", "cardVisual"}
     skips, rendered = [], 0
-    for container in sorted(page["visuals"], key=lambda x: (x.get("position", {}).get("y", 0), x.get("position", {}).get("x", 0))):
+    containers = [c for c in sorted(page["visuals"], key=lambda x: (x.get("position", {}).get("y", 0), x.get("position", {}).get("x", 0))) if c.get("visual", {}).get("visualType") in supported]
+    if not containers:
+        st.info("No supported source visuals are available for this dataset.")
+        return skips
+    labels = {}
+    for c in containers:
+        queries = c.get("visual", {}).get("query", {}).get("queryState", {})
+        fields = [p.get("nativeQueryRef", p.get("queryRef", "")) for spec in queries.values() for p in spec.get("projections", [])]
+        labels[c['name']] = " / ".join(fields)[:150] or c.get("visual", {}).get("visualType", "Chart")
+    chosen = st.selectbox("Source chart", [c['name'] for c in containers], format_func=lambda name: labels[name], key=f"source_chart_{page['name']}_{table}")
+    st.caption("Charts load individually to keep memory use within the server limit.")
+    for container in containers:
+        if container['name'] != chosen:
+            continue
         visual = container.get("visual", {})
         kind = visual.get("visualType")
         if kind not in supported:
@@ -223,7 +236,7 @@ def source_charts(page, frame, table):
             rendered += 1
         except (KeyError, ValueError, TypeError) as e:
             skips.append({"Visual": container.get("name"), "Type": kind, "Reason": str(e)})
-    st.caption(f"{rendered} source visual(s) converted for this dataset. Original saved slicer selections are reset; use the application's filters.")
+    st.caption(f"{rendered} selected source visual(s) converted. Original saved slicer selections are reset; use the application's filters.")
     return skips
 
 
@@ -272,8 +285,10 @@ def run():
         st.caption("Calculated rules from the selected data. No generative AI or external data transfer.")
         for insight in insights:
             st.write("• " + insight)
-    overview, converted, records, methodology = st.tabs(["Overview", "Source charts", "Records", "Definitions & skipped charts"])
-    with overview:
+    # Streamlit tabs eagerly execute every panel, even when hidden. Render only
+    # the chosen view so login does not build all source figures at once.
+    view = st.radio("View", ["Overview", "Source charts", "Records", "Definitions & skipped charts"], horizontal=True, key=f"view_{page_name}")
+    if view == "Overview":
         candidates = [c for c in selected.columns if c.strip().casefold() in {"status", "category", "priority", "project name", "contract title", "contract in charge", "building", "trade", "segmet", "vendor_category", "mr status", "categories"}]
         if candidates and len(selected):
             grouping = st.selectbox("Breakdown by", candidates, key=f"breakdown_{page_name}")
@@ -284,9 +299,11 @@ def run():
             st.caption("Top 25 categories displayed. Counts represent source rows, not automatically distinct jobs or people.")
         else:
             st.info("No configured categorical breakdown is available for this dataset.")
-    with converted:
+    elif view == "Source charts":
         skipped = source_charts(page, selected, table)
-    with records:
+        if skipped:
+            st.dataframe(pd.DataFrame(skipped), hide_index=True, use_container_width=True)
+    elif view == "Records":
         visible = st.multiselect("Visible columns", list(selected.columns), default=list(selected.columns[:10]), key=f"columns_{page_name}_{table}")
         page_size = 100
         page_count = max(1, (len(selected) + page_size - 1) // page_size)
@@ -294,17 +311,14 @@ def run():
         start = (int(page_number) - 1) * page_size
         st.dataframe(selected.iloc[start:start + page_size][visible], hide_index=True, use_container_width=True)
         st.caption(f"Page {page_number:,} of {page_count:,}. View-only data; no record editing is enabled.")
-    with methodology:
+    elif view == "Definitions & skipped charts":
         st.write("Work orders: BREAKDOWN → Reactive; PPM → PPM; SCHEDULEDTASK → Corrective. COMPLETE and HISTORY are completed; ACTIVE and ASSIGNED are open; CANCELLED is separate. Completion percentage = completed ÷ (total − cancelled). Unknown statuses remain separate.")
         st.write("Dates are evaluated against today's date in Dubai. Imported calculated columns retain their snapshot values. Figures count rows unless labelled otherwise. Each dataset is filtered independently; no cross-table relationship or DAX result is inferred.")
         st.write("The original page names and source tables are retained. The application uses a responsive layout; Power BI custom visuals, bookmarks, drill-through, complex saved visual conditions, and unsupported DAX calculations are not reproduced automatically. Missing-field charts are skipped.")
         if manifest.get("import_warnings"):
             st.write("Import exceptions: invalid source dates were retained as missing values.")
             st.dataframe(pd.DataFrame(manifest["import_warnings"]), hide_index=True)
-        if skipped:
-            st.dataframe(pd.DataFrame(skipped), hide_index=True, use_container_width=True)
-        else:
-            st.caption("No skipped supported chart types were recorded for this dataset. Custom visual types and decorative objects are outside automatic conversion.")
+        st.caption("Select a visual under Source charts to see its conversion result or the reason it was skipped. Custom visual types and decorative objects are outside automatic conversion.")
 
 
 run()
