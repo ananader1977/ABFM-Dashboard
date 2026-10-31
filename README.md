@@ -49,7 +49,7 @@ GitHub stores code; GitHub Pages cannot run this Python server or enforce these 
 
 ```sh
 docker build -t abfm-dashboard .
-docker run --rm -p 8501:8501 -v /private/abfm-data:/app/data abfm-dashboard
+docker run --rm -p 8501:10000 -v /private/abfm-data:/var/data abfm-dashboard
 ```
 
 Bootstrap accounts and import the PBIX before starting production. Back up the private data directory. Docker deliberately excludes imported data and secrets from the image. Put an HTTPS reverse proxy in front of the app for internet access.
@@ -61,3 +61,7 @@ python -m unittest discover -s tests -v
 ```
 
 Tests cover task type isolation, cancellation separation, completion denominators, overdue handling, unknown statuses, quotation award rules, operations permission denial, session revocation, administrator protection, and sign-in lockout.
+
+## Render startup
+
+The Docker launcher respects PORT and stores data under /var/data. Attach the approved persistent disk there. On an empty disk, set ABFM_PACKAGE_SHA256 to the SHA-256 of the private delivery ZIP, then upload that exact package on the initialization page. The launcher extracts only the selected snapshot and account database, never source files or plaintext credential documents. Other packages and overwrite attempts are rejected. Once initialized, the setup server closes and Streamlit starts; later restarts go straight to the application. Keep the private ZIP out of GitHub.
