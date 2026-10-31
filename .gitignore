@@ -1,0 +1,11 @@
+data/
+*.pbix
+*.parquet
+*.sqlite*
+*.db
+*.zip
+.env
+.streamlit/secrets.toml
+__pycache__/
+.venv/
+.pytest_cache/

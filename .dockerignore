@@ -1,0 +1,5 @@
+data
+*.pbix
+*.zip
+.git
+__pycache__
