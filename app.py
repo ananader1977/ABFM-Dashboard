@@ -15,6 +15,7 @@ from analytics import PAGE_TABLES, TASK_TYPES, aggregate, dates, field_reference
 from brand import LOGO
 from security import authenticate, connect, current_user, save_user, rename_user
 from measures import measure
+from data_access import load_table, load_rows, work_order_columns, source_visuals, SOURCE_VISUAL_TYPES
 
 ROOT = Path(os.environ.get("ABFM_DATA_DIR", Path(__file__).parent / "data"))
 st.set_page_config(page_title="Al Bonian FM | Operations Intelligence", page_icon="🏢", layout="wide")
@@ -55,11 +56,10 @@ def login():
                 st.info("Account setup is required on the server before sign-in is available.")
 
 
-@st.cache_resource(show_spinner=False, max_entries=1)
-def read_table(path, modified):
-    # Arrow-backed strings avoid expanding the largest table into hundreds of MB.
-    # Callers create their own selection before changing any data.
-    return pd.read_parquet(path, dtype_backend="pyarrow")
+def read_table(path, modified, task_type=None, columns=None):
+    # Filter inside the file scanner, before allocating a DataFrame. Retaining a
+    # previous full-table cache while loading the next tab can exceed 512 MB.
+    return load_table(path, task_type=task_type, columns=columns)
 
 
 def snapshot():
@@ -120,10 +120,10 @@ def admin_panel(user):
         st.dataframe(audit, hide_index=True, use_container_width=True)
 
 
-def filters(frame, table):
+def filters(frame, table, source_columns=None):
     result = frame
     with st.expander("Filter this dataset", expanded=False):
-        available = [c for c in frame.columns if not c.startswith("_")]
+        available = [c for c in (source_columns if source_columns is not None else frame.columns) if not c.startswith("_")]
         selected = st.multiselect("Choose filter fields", available, key=f"fields_{table}")
         for col in selected:
             series = frame[col]
@@ -158,9 +158,9 @@ def metric_cards(metrics):
 
 
 def source_charts(page, frame, table):
-    supported = {"barChart", "clusteredBarChart", "stackedBarChart", "columnChart", "clusteredColumnChart", "stackedColumnChart", "hundredPercentStackedBarChart", "hundredPercentStackedColumnChart", "lineChart", "areaChart", "pieChart", "donutChart", "card", "cardVisual"}
+    supported = SOURCE_VISUAL_TYPES
     skips, rendered = [], 0
-    containers = [c for c in sorted(page["visuals"], key=lambda x: (x.get("position", {}).get("y", 0), x.get("position", {}).get("x", 0))) if c.get("visual", {}).get("visualType") in supported]
+    containers = source_visuals(page)
     if not containers:
         st.info("No supported source visuals are available for this dataset.")
         return skips
@@ -272,11 +272,18 @@ def run():
     if not tables:
         st.warning("The source tables for this page are unavailable. Charts have been skipped.")
         return
-    table = st.selectbox("Dataset", tables) if len(tables) > 1 else tables[0]
+    table = st.selectbox("Dataset", tables, key=f"dataset_{page_name}") if len(tables) > 1 else tables[0]
     info = manifest["tables"][table]
     path = directory / info["file"]
-    frame = task_frame(read_table(str(path), path.stat().st_mtime_ns), page_name)
-    selected = filters(frame, table)
+    view_requested = st.session_state.get(f"view_{page_name}", "Overview")
+    projection = None
+    if page_name in TASK_TYPES:
+        choices = source_visuals(page)
+        chosen = st.session_state.get(f"source_chart_{page_name}_{table}")
+        visual = next((c for c in choices if c['name'] == chosen), choices[0] if choices else None)
+        projection = work_order_columns(info['columns'], view_requested, st.session_state.get(f"fields_{table}", []), visual)
+    frame = read_table(str(path), path.stat().st_mtime_ns, TASK_TYPES.get(page_name), projection)
+    selected = filters(frame, table, info['columns'])
     st.caption(f"{len(selected):,} selected records / {len(frame):,} records in this tab • Dataset: {table}")
     metrics, insights = summarize(selected, table, page_name)
     metric_cards(metrics)
@@ -304,12 +311,16 @@ def run():
         if skipped:
             st.dataframe(pd.DataFrame(skipped), hide_index=True, use_container_width=True)
     elif view == "Records":
-        visible = st.multiselect("Visible columns", list(selected.columns), default=list(selected.columns[:10]), key=f"columns_{page_name}_{table}")
+        visible = st.multiselect("Visible columns", info['columns'], default=info['columns'][:10], key=f"columns_{page_name}_{table}")
         page_size = 100
         page_count = max(1, (len(selected) + page_size - 1) // page_size)
         page_number = st.number_input("Record page", min_value=1, max_value=page_count, value=1, key=f"record_page_{page_name}_{len(selected)}")
         start = (int(page_number) - 1) * page_size
-        st.dataframe(selected.iloc[start:start + page_size][visible], hide_index=True, use_container_width=True)
+        if visible:
+            displayed = load_rows(str(path), TASK_TYPES.get(page_name), visible, selected.index[start:start + page_size])
+            st.dataframe(displayed, hide_index=True, use_container_width=True)
+        else:
+            st.info("Choose at least one visible column.")
         st.caption(f"Page {page_number:,} of {page_count:,}. View-only data; no record editing is enabled.")
     elif view == "Definitions & skipped charts":
         st.write("Work orders: BREAKDOWN → Reactive; PPM → PPM; SCHEDULEDTASK → Corrective. COMPLETE and HISTORY are completed; ACTIVE and ASSIGNED are open; CANCELLED is separate. Completion percentage = completed ÷ (total − cancelled). Unknown statuses remain separate.")

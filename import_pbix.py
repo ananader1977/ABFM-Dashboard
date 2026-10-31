@@ -44,7 +44,7 @@ def extract(source, destination):
             if len(frame.columns) == 0:
                 continue
             filename = f"table_{i:03}.parquet"
-            frame.to_parquet(stage / filename, index=False)
+            frame.to_parquet(stage / filename, index=False, row_group_size=2048)
             tables[name] = {"file": filename, "rows": len(frame), "columns": list(frame.columns)}
         pages = []
         with zipfile.ZipFile(source) as archive:

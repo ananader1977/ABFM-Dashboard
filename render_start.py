@@ -106,6 +106,9 @@ def main():
         server.serve_forever()
         server.server_close()
         gc.collect()
+    from parquet_layout import prepare_snapshot
+    if prepare_snapshot(root):
+        print("Prepared bounded data blocks for dashboard reads.", flush=True)
     print("Starting Al Bonian FM dashboard.", flush=True)
     os.execvp("python", ["python", "-m", "streamlit", "run", "app.py", "--server.address=0.0.0.0", f"--server.port={port}", "--browser.gatherUsageStats=false"])
 
