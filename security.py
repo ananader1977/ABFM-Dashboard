@@ -6,6 +6,8 @@ from pathlib import Path
 import secrets
 import sqlite3
 import time
+import json
+import re
 
 
 def connect(root):
@@ -106,6 +108,38 @@ def bootstrap(root):
         for username, role in (("admin", "admin"), ("operations", "operations")):
             password = getpass.getpass(f"Set {username} password (12+ characters): ")
             db.execute("INSERT INTO users (username,password,role) VALUES (?,?,?)", (username, password_hash(password), role))
+
+
+def apply_approved_admin_reset(root, payload):
+    """Apply an owner-approved secret supplied by the hosting control plane once."""
+    if not payload:
+        return False
+    request = json.loads(payload)
+    request_id = request.get('request_id', '')
+    hashed = request.get('password_hash', '')
+    if request.get('username') != 'admin' or not re.fullmatch(r'[0-9a-f]{32}', request_id) or not re.fullmatch(r'[0-9a-f]{32}:[0-9a-f]{128}', hashed):
+        raise ValueError('Invalid approved admin reset request.')
+    db = connect(root)
+    try:
+        db.execute('CREATE TABLE IF NOT EXISTS applied_admin_resets (request_id TEXT PRIMARY KEY, applied_at REAL NOT NULL)')
+        db.execute('BEGIN IMMEDIATE')
+        if db.execute('SELECT 1 FROM applied_admin_resets WHERE request_id=?', (request_id,)).fetchone():
+            db.commit()
+            return False
+        user = db.execute("SELECT role,active FROM users WHERE username='admin'").fetchone()
+        if not user or user['role'] != 'admin' or not user['active']:
+            raise ValueError('The active admin account was not found.')
+        db.execute("UPDATE users SET password=?,version=version+1 WHERE username='admin'", (hashed,))
+        db.execute("DELETE FROM attempts WHERE username='admin'")
+        db.execute('INSERT INTO applied_admin_resets VALUES (?,?)', (request_id, time.time()))
+        db.execute('INSERT INTO audit VALUES (?,?,?,?)', (time.time(), 'hosting-owner', 'approved password reset', 'admin'))
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":
