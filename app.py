@@ -18,6 +18,7 @@ from measures import measure
 from data_access import load_table, load_rows, work_order_columns, source_visuals, SOURCE_VISUAL_TYPES
 
 ROOT = Path(os.environ.get("ABFM_DATA_DIR", Path(__file__).parent / "data"))
+REMOVED_PAGES = {"Asset Details", "KPI & MR", "Quotations", "Cheque Request", "Cheque Requests", "QHSE"}
 st.set_page_config(page_title="Al Bonian FM | Operations Intelligence", page_icon="🏢", layout="wide")
 st.markdown("""<style>
 :root { --navy:#102b4e; }
@@ -251,7 +252,7 @@ def run():
         st.caption(f"{user['username']} · {user['role']}")
         st.title("FM Dashboard")
         directory, manifest = snapshot()
-        names = [p["name"] for p in manifest["pages"]] if manifest else []
+        names = [p["name"] for p in manifest["pages"] if p["name"] not in REMOVED_PAGES] if manifest else []
         options = names + (["Administration"] if user["role"] == "admin" else [])
         page_name = st.radio("Workspace", options) if options else None
         if st.button("Sign out", use_container_width=True):
@@ -263,6 +264,9 @@ def run():
         return
     if not manifest:
         st.info("No data snapshot has been imported. An administrator can import the Power BI file.")
+        return
+    if page_name is None:
+        st.info("No dashboard tabs are available in this snapshot.")
         return
     page = next(p for p in manifest["pages"] if p["name"] == page_name)
     st.caption("AL BONIAN FM / OPERATIONS INTELLIGENCE")

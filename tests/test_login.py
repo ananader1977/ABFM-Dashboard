@@ -17,9 +17,9 @@ class LoginFlow(unittest.TestCase):
             root = Path(directory)
             snapshot = root / "snapshot-test"
             snapshot.mkdir()
-            frame = pd.DataFrame({"Asset Code": ["A1", "A2"], "Building": ["Site A", "Site B"], "Replacement Cost": [100, 200]})
+            frame = pd.DataFrame({"Task Type": ["BREAKDOWN", "BREAKDOWN"], "Status": ["COMPLETE", "ACTIVE"], "Category": ["General", "Urgent"]})
             frame.to_parquet(snapshot / "assets.parquet", index=False)
-            manifest = {"imported_at": "2026-10-31T00:00:00Z", "pages": [{"name": "Asset Details", "visuals": []}], "tables": {"Asset Details": {"file": "assets.parquet", "rows": 2, "columns": list(frame.columns)}}}
+            manifest = {"imported_at": "2026-10-31T00:00:00Z", "pages": [{"name": "Reactive", "visuals": []}], "tables": {"Reactive": {"file": "assets.parquet", "rows": 2, "columns": list(frame.columns)}}}
             (snapshot / "manifest.json").write_text(json.dumps(manifest))
             (root / "current.txt").write_text(snapshot.name)
             db = connect(root)
