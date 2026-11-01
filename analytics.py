@@ -34,7 +34,9 @@ def numbers(frame, name):
 
 
 def normalized(series):
-    return series.fillna("").astype(str).str.strip().str.upper()
+    # Keep strings variable-width. NumPy's astype(str) can allocate the longest
+    # RFQ scope length for every row and consume hundreds of MB.
+    return series.astype('string[pyarrow]').fillna("").str.strip().str.upper()
 
 
 def dates(series):

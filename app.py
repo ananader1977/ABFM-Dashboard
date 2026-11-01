@@ -6,30 +6,23 @@ import os
 from pathlib import Path
 import tempfile
 import time
+import gc
 
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 
 from analytics import PAGE_TABLES, TASK_TYPES, aggregate, dates, field_reference, resolve, summarize, task_frame, source_filters
 from brand import LOGO
 from security import authenticate, connect, current_user, save_user, rename_user
 from measures import measure
-from data_access import load_table, load_rows, work_order_columns, source_visuals, SOURCE_VISUAL_TYPES
+from data_access import load_table, load_rows, display_columns, source_visuals, SOURCE_VISUAL_TYPES
+from visuals import CSS, page_header, polish, overview
+from executive import PAGE as EXECUTIVE_PAGE, render as executive_summary, scope_frame, clear_scope
 
 ROOT = Path(os.environ.get("ABFM_DATA_DIR", Path(__file__).parent / "data"))
 REMOVED_PAGES = {"Asset Details", "KPI & MR", "Quotations", "Cheque Request", "Cheque Requests", "QHSE"}
 st.set_page_config(page_title="Al Bonian FM | Operations Intelligence", page_icon="🏢", layout="wide")
-st.markdown("""<style>
-:root { --navy:#102b4e; }
-.stApp {background:#f4f6fa;color:#102b4e}
-[data-testid="stSidebar"] {background:#102b4e}
-[data-testid="stSidebar"] p,[data-testid="stSidebar"] label,[data-testid="stSidebar"] h1,[data-testid="stSidebar"] h2,[data-testid="stSidebar"] h3 {color:white!important}
-[data-testid="stMetric"] {background:white;border:1px solid #e1e6ee;border-radius:12px;padding:18px}
-h1,h2,h3 {color:#102b4e}
-.brand {background:#102b4e;padding:22px;border-radius:12px;margin-bottom:18px}
-.brand img {max-width:280px;width:100%}
-</style>""", unsafe_allow_html=True)
+st.markdown(CSS, unsafe_allow_html=True)
 
 
 def brand():
@@ -137,14 +130,14 @@ def filters(frame, table, source_columns=None):
                         values = dates(result[col])
                         result = result.loc[values.ge(pd.Timestamp(span[0])) & values.lt(pd.Timestamp(span[1]) + pd.Timedelta(days=1))]
             elif series.nunique() <= 500:
-                choices = sorted(series.dropna().astype(str).unique())
+                choices = sorted(series.dropna().astype('string[pyarrow]').unique())
                 chosen = st.multiselect(col, choices, key=f"filter_{table}_{col}")
                 if chosen:
-                    result = result.loc[result[col].astype(str).isin(chosen)]
+                    result = result.loc[result[col].astype('string[pyarrow]').isin(chosen)]
             else:
                 text = st.text_input(f"{col} contains", key=f"search_{table}_{col}")
                 if text:
-                    result = result.loc[result[col].astype(str).str.contains(text, case=False, regex=False, na=False)]
+                    result = result.loc[result[col].astype('string[pyarrow]').str.contains(text, case=False, regex=False, na=False)]
         st.caption("All metrics, action highlights, charts, and the record table below use this selection. Filters apply to this dataset only.")
     return result
 
@@ -216,13 +209,14 @@ def source_charts(page, frame, table):
                 grouped = pd.DataFrame([{dim: key, "Value": evaluate(group, value), "Series": value['column']} for key, group in chart_frame.groupby(dim, dropna=False) for value in values])
                 if grouped.empty:
                     continue
-                grouped[dim] = grouped[dim].fillna("(Blank)").astype(str)
+                grouped[dim] = grouped[dim].fillna("(Blank)").astype('string[pyarrow]')
                 grouped = grouped.sort_values("Value", ascending=False)
                 if grouped[dim].nunique() > 25:
                     chosen = grouped.groupby(dim).Value.sum().nlargest(25).index
                     grouped = grouped.loc[grouped[dim].isin(chosen)]
                     title += " • top 25 categories"
                 st.subheader(title)
+                import plotly.express as px
                 if kind in {"pieChart", "donutChart"} and len(values) == 1 and grouped.Value.ge(0).all():
                     figure = px.pie(grouped, names=dim, values="Value", hole=.55 if kind == "donutChart" else 0, color_discrete_sequence=px.colors.sequential.Blues_r)
                 elif kind in {"lineChart", "areaChart"}:
@@ -233,7 +227,7 @@ def source_charts(page, frame, table):
                         grouped['Value'] = grouped.Value.div(denominators.where(denominators.ne(0))) * 100
                     figure = px.bar(grouped, x="Value", y=dim, color="Series", orientation="h", barmode="group" if kind.startswith('clustered') else 'relative', text_auto=".3s", color_discrete_sequence=["#173c68", "#6889ac", "#b7c9dd"])
                 figure.update_layout(paper_bgcolor="white", plot_bgcolor="white", margin=dict(l=10, r=10, t=20, b=10), height=max(300, min(700, 32 * len(grouped))))
-                st.plotly_chart(figure, use_container_width=True, key=f"native_{container['name']}")
+                st.plotly_chart(polish(figure, height=max(300, min(700, 32 * len(grouped)))), width='stretch', key=f"native_{container['name']}")
             rendered += 1
         except (KeyError, ValueError, TypeError) as e:
             skips.append({"Visual": container.get("name"), "Type": kind, "Reason": str(e)})
@@ -242,6 +236,9 @@ def source_charts(page, frame, table):
 
 
 def run():
+    # Plotly figures contain reference cycles. Reclaim prior views before reading
+    # the next dataset so repeated chart changes do not retain their buffers.
+    gc.collect()
     user = current_user(ROOT, st.session_state.get("identity"))
     if not user:
         st.session_state.pop("identity", None)
@@ -252,9 +249,10 @@ def run():
         st.caption(f"{user['username']} · {user['role']}")
         st.title("FM Dashboard")
         directory, manifest = snapshot()
-        names = [p["name"] for p in manifest["pages"] if p["name"] not in REMOVED_PAGES] if manifest else []
+        available_pages = [p["name"] for p in manifest["pages"] if p["name"] not in REMOVED_PAGES and p['name'] != EXECUTIVE_PAGE] if manifest else []
+        names = [EXECUTIVE_PAGE] + available_pages if manifest else []
         options = names + (["Administration"] if user["role"] == "admin" else [])
-        page_name = st.radio("Workspace", options) if options else None
+        page_name = st.radio("Workspace", options, key='workspace_page') if options else None
         if st.button("Sign out", use_container_width=True):
             st.session_state.clear()
             st.rerun()
@@ -268,10 +266,11 @@ def run():
     if page_name is None:
         st.info("No dashboard tabs are available in this snapshot.")
         return
+    if page_name == EXECUTIVE_PAGE:
+        executive_summary(directory,manifest,available_pages)
+        return
     page = next(p for p in manifest["pages"] if p["name"] == page_name)
-    st.caption("AL BONIAN FM / OPERATIONS INTELLIGENCE")
-    st.title(page_name)
-    st.caption(f"Snapshot imported {manifest['imported_at'][:19]} UTC • No automatic connection to Power BI service")
+    page_header(page_name, manifest['imported_at'])
     tables = [t for t in PAGE_TABLES.get(page_name, []) if t in manifest["tables"]]
     if not tables:
         st.warning("The source tables for this page are unavailable. Charts have been skipped.")
@@ -280,36 +279,34 @@ def run():
     info = manifest["tables"][table]
     path = directory / info["file"]
     view_requested = st.session_state.get(f"view_{page_name}", "Overview")
-    projection = None
-    if page_name in TASK_TYPES:
-        choices = source_visuals(page)
-        chosen = st.session_state.get(f"source_chart_{page_name}_{table}")
-        visual = next((c for c in choices if c['name'] == chosen), choices[0] if choices else None)
-        projection = work_order_columns(info['columns'], view_requested, st.session_state.get(f"fields_{table}", []), visual)
+    choices = source_visuals(page)
+    chosen = st.session_state.get(f"source_chart_{page_name}_{table}")
+    visual = next((c for c in choices if c['name'] == chosen), choices[0] if choices else None)
+    projection = display_columns(info['columns'], table, view_requested, st.session_state.get(f"fields_{table}", []), visual)
     frame = read_table(str(path), path.stat().st_mtime_ns, TASK_TYPES.get(page_name), projection)
+    tab_total = len(frame)
+    scope = st.session_state.get('executive_scope')
+    if scope and scope.get('page') == page_name:
+        st.caption('Executive Summary selection · showing matching action records')
+        st.button('Show all records in this workspace',key='clear_executive_selection',on_click=clear_scope)
+        try:
+            frame = scope_frame(frame,scope['rule'])
+        except KeyError:
+            st.warning('This snapshot no longer contains the fields for that executive rule. Clear the selection to view all records.')
+            st.stop()
     selected = filters(frame, table, info['columns'])
-    st.caption(f"{len(selected):,} selected records / {len(frame):,} records in this tab • Dataset: {table}")
+    st.caption(f"{len(selected):,} selected records / {tab_total:,} records in this tab • Dataset: {table}")
     metrics, insights = summarize(selected, table, page_name)
     metric_cards(metrics)
-    with st.container(border=True):
-        st.subheader("Action highlights")
-        st.caption("Calculated rules from the selected data. No generative AI or external data transfer.")
+    with st.expander(f"Action highlights · {len(insights)} review point(s)", expanded=False):
+        st.caption("Calculated from the current selection.")
         for insight in insights:
             st.write("• " + insight)
     # Streamlit tabs eagerly execute every panel, even when hidden. Render only
     # the chosen view so login does not build all source figures at once.
     view = st.radio("View", ["Overview", "Source charts", "Records", "Definitions & skipped charts"], horizontal=True, key=f"view_{page_name}")
     if view == "Overview":
-        candidates = [c for c in selected.columns if c.strip().casefold() in {"status", "category", "priority", "project name", "contract title", "contract in charge", "building", "trade", "segmet", "vendor_category", "mr status", "categories"}]
-        if candidates and len(selected):
-            grouping = st.selectbox("Breakdown by", candidates, key=f"breakdown_{page_name}")
-            distribution = selected[grouping].fillna("(Blank)").astype(str).replace("", "(Blank)").value_counts().rename_axis(grouping).reset_index(name="Records")
-            figure = px.bar(distribution.head(25), x="Records", y=grouping, orientation="h", text="Records", color_discrete_sequence=["#173c68"])
-            figure.update_layout(yaxis={"categoryorder": "total ascending"}, paper_bgcolor="white", plot_bgcolor="white", height=max(350, min(800, len(distribution.head(25)) * 32)))
-            st.plotly_chart(figure, use_container_width=True)
-            st.caption("Top 25 categories displayed. Counts represent source rows, not automatically distinct jobs or people.")
-        else:
-            st.info("No configured categorical breakdown is available for this dataset.")
+        overview(selected, table, page_name)
     elif view == "Source charts":
         skipped = source_charts(page, selected, table)
         if skipped:
