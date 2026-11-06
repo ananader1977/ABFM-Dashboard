@@ -22,6 +22,7 @@ from visuals import CSS, page_header, polish, overview
 from executive import PAGE as EXECUTIVE_PAGE, render as executive_summary, scope_frame, clear_scope
 
 ROOT = Path(os.environ.get("ABFM_DATA_DIR", Path(__file__).parent / "data"))
+PAGE_LABELS = {"MR tracker": "MR Tracker", "SubContractors Agrements": "Subcontractors Agreement"}
 REMOVED_PAGES = {"Asset Details", "KPI & MR", "Quotations", "Cheque Request", "Cheque Requests", "QHSE", "Manpower", "Manpower Management"}
 st.set_page_config(page_title="Al Bonian FM | Operations Intelligence", page_icon="🏢", layout="wide")
 st.markdown(CSS, unsafe_allow_html=True)
@@ -96,14 +97,16 @@ def admin_panel(user):
             except (ValueError, PermissionError) as e:
                 st.error(str(e))
     st.subheader("Replace work-order data")
-    st.caption("Makes this workbook the only active dataset using the approved fields and status rules. Previous snapshots are retained for recovery. Upload the prepared Parquet version of the workbook.")
+    st.caption("Updates work orders using the approved fields and status rules; MR Tracker, RFQ and subcontractor datasets remain available. Previous snapshots are retained for recovery. Upload the prepared Parquet version of the workbook.")
     replacement = st.file_uploader("Prepared work-order data", type=["parquet"], key="replacement_work_order_upload")
     if replacement and st.button("Apply replacement work orders"):
         try:
             with st.spinner("Validating and saving work orders…"):
                 report = install_replacement(replacement, ROOT)
+                from work_orders import restore_requested_workspaces
+                restore_requested_workspaces(ROOT)
             st.cache_data.clear()
-            st.success(f"Replaced work orders: {report['rows']:,} records. Only workbook data is active.")
+            st.success(f"Replaced work orders: {report['rows']:,} records. Work orders updated; restored MR, RFQ and subcontractor datasets retained.")
         except (ValueError, KeyError) as error:
             st.error(str(error))
     with st.expander("Snapshot recovery"):
@@ -261,7 +264,7 @@ def run():
         available_pages = [p["name"] for p in manifest["pages"] if p["name"] not in REMOVED_PAGES and p['name'] != EXECUTIVE_PAGE] if manifest else []
         names = [EXECUTIVE_PAGE] + available_pages if manifest else []
         options = names + (["Administration"] if user["role"] == "admin" else [])
-        page_name = st.radio("Workspace", options, key='workspace_page') if options else None
+        page_name = st.radio("Workspace", options, format_func=lambda name: PAGE_LABELS.get(name, name), key='workspace_page') if options else None
         if st.button("Sign out", use_container_width=True):
             st.session_state.clear()
             st.rerun()
@@ -279,7 +282,7 @@ def run():
         executive_summary(directory,manifest,available_pages)
         return
     page = next(p for p in manifest["pages"] if p["name"] == page_name)
-    page_header(page_name, manifest.get('work_order_source', {}).get('imported_at', manifest['imported_at']) if page_name in TASK_TYPES else manifest['imported_at'])
+    page_header(PAGE_LABELS.get(page_name, page_name), manifest.get('work_order_source', {}).get('imported_at', manifest['imported_at']) if page_name in TASK_TYPES else manifest.get('page_imported_at', {}).get(page_name, manifest['imported_at']))
     if page_name in TASK_TYPES and manifest.get('work_order_source'):
         st.caption('Work-order source: Anas - All Work Orders.xlsx · Assigned Resource supplies technician. Scheduled, In Progress and Unscheduled are open; Completed is completed; Canceled is separate. This source has no verified due date, so overdue charts are skipped.')
     tables = [t for t in PAGE_TABLES.get(page_name, []) if t in manifest["tables"]]
@@ -309,10 +312,12 @@ def run():
         st.info('This older snapshot has no verified Assigned Resource or Contract Manager fields. No names have been inferred.')
     frame = quick_filters(frame, page_name)
     selected = filters(frame, table, list(frame.columns))
+    metrics_slot = st.container()
     selected = linked_charts(selected, table, page_name)
-    st.caption(f"{len(selected):,} selected records / {tab_total:,} records in this tab • Dataset: {table}")
     metrics, insights = summarize(selected, table, page_name)
-    metric_cards(metrics)
+    with metrics_slot:
+        st.caption(f"{len(selected):,} selected records / {tab_total:,} records in this tab • Dataset: {table}")
+        metric_cards(metrics)
     with st.expander(f"Action highlights · {len(insights)} review point(s)", expanded=False):
         st.caption("Calculated from the current selection.")
         for insight in insights:
