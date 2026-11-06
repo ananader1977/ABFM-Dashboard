@@ -121,7 +121,7 @@ def render(directory,manifest,pages):
         data=collect(str(directory),(directory/'manifest.json').stat().st_mtime_ns,tuple(pages))
     stats=data['work_orders']
     columns=st.columns(4)
-    if manifest.get('work_orders_only'):
+    if manifest.get('work_order_source'):
         for column, label, metric in zip(columns, ['Total work orders','Completed work orders','Open work orders','Cancelled work orders'], ['Total work orders','Completed','Open','Cancelled']):
             column.metric(label, f"{sum(v[metric] for v in stats.values()):,}")
     else:
@@ -179,4 +179,4 @@ def render(directory,manifest,pages):
             data=lambda: excel_bytes(list(summary.columns), summary.itertuples(index=False, name=None)),
             file_name='ABFM_Executive_Summary.xlsx',
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', on_click='ignore')
-    st.caption('Only Anas - All Work Orders.xlsx is active. Counts use the confirmed status rules; cancellations remain separate.' if manifest.get('work_orders_only') else 'Calculated from imported snapshots. This is not a live Power BI connection.')
+    st.caption('Work orders use Anas - All Work Orders.xlsx. MR Tracker, RFQ and Subcontractors Agreement use their restored snapshot; source dates are shown per workspace. Cancellations remain separate.' if manifest.get('requested_restored_pages') else 'Only Anas - All Work Orders.xlsx is active. Counts use the confirmed status rules; cancellations remain separate.' if manifest.get('work_orders_only') else 'Calculated from imported snapshots. This is not a live Power BI connection.')
