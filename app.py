@@ -95,32 +95,28 @@ def admin_panel(user):
                 st.success("Username changed. Existing sessions for this account have been invalidated.")
             except (ValueError, PermissionError) as e:
                 st.error(str(e))
-    st.subheader("Refresh dashboard snapshot")
-    st.caption("Imports replace the current snapshot. Power BI service refreshes do not automatically update this application. Legacy User_Security credentials are excluded.")
-    uploaded = st.file_uploader("Replacement Power BI file", type=["pbix"])
-    if uploaded and st.button("Import replacement data", type="primary"):
-        from import_pbix import extract
-        with tempfile.TemporaryDirectory() as directory:
-            source = Path(directory) / "source.pbix"
-            source.write_bytes(uploaded.getbuffer())
-            try:
-                with st.spinner("Extracting and validating snapshot…"):
-                    result = extract(source, ROOT)
-                st.cache_resource.clear()
-                st.success(f"Imported {result['tables']} tables and {result['pages']} pages.")
-            except Exception:
-                st.error("Import failed. The current snapshot was retained. Check that the PBIX contains an embedded data model.")
     st.subheader("Replace work-order data")
-    st.caption("Replaces only work orders using the approved Excel fields and status rules; other datasets and the previous snapshot are retained. Upload the prepared Parquet version of the workbook.")
+    st.caption("Makes this workbook the only active dataset using the approved fields and status rules. Previous snapshots are retained for recovery. Upload the prepared Parquet version of the workbook.")
     replacement = st.file_uploader("Prepared work-order data", type=["parquet"], key="replacement_work_order_upload")
     if replacement and st.button("Apply replacement work orders"):
         try:
             with st.spinner("Validating and saving work orders…"):
                 report = install_replacement(replacement, ROOT)
             st.cache_data.clear()
-            st.success(f"Replaced work orders: {report['rows']:,} records. Other datasets preserved.")
+            st.success(f"Replaced work orders: {report['rows']:,} records. Only workbook data is active.")
         except (ValueError, KeyError) as error:
             st.error(str(error))
+    with st.expander("Snapshot recovery"):
+        st.caption("Previous snapshots are retained as a recoverable backup and are excluded from the active dashboard.")
+        current_name = (ROOT / 'current.txt').read_text().strip() if (ROOT / 'current.txt').exists() else ''
+        backups = sorted([p.name for p in ROOT.glob('snapshot-*') if (p / 'manifest.json').exists() and p.name != current_name])
+        if backups:
+            recover = st.selectbox('Previous snapshot', backups)
+            if st.button('Restore selected snapshot'):
+                from work_orders import restore_snapshot
+                restore_snapshot(ROOT, recover)
+                st.cache_data.clear()
+                st.rerun()
     with st.expander("Account audit log"):
         with connect(ROOT) as db:
             audit = pd.read_sql_query("SELECT datetime(at,'unixepoch') AS utc_time, actor,action,target FROM audit ORDER BY at DESC LIMIT 100", db)
