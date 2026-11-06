@@ -7,7 +7,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.dataset as ds
 import streamlit as st
-from analytics import TASK_TYPES, OPEN, normalized, resolve, numbers, dates, today, work_order_metrics
+from analytics import TASK_TYPES, OPEN, COMPLETED, normalized, resolve, numbers, dates, today, work_order_metrics
 from visuals import page_header, heading, ring, bars, draw, INK, GOLD, SILVER
 
 PAGE = 'Executive Summary'
@@ -25,6 +25,9 @@ RULES = {
 
 
 def scope_frame(frame, rule):
+    if rule=='wo_completed':return frame.loc[normalized(frame[resolve(frame,'Status')]).isin(COMPLETED)]
+    if rule=='wo_cancelled':return frame.loc[normalized(frame[resolve(frame,'Status')]).eq('CANCELLED')]
+    if rule=='wo_other':return frame.loc[~normalized(frame[resolve(frame,'Status')]).isin(OPEN | COMPLETED | {'CANCELLED'})]
     if rule=='wo_open':return frame.loc[normalized(frame[resolve(frame,'Status')]).isin(OPEN)]
     if rule=='positive_balance':return frame.loc[numbers(frame,'Balance Value').gt(0).fillna(False)]
     if rule=='rfq_open':return frame.loc[normalized(frame[resolve(frame,'Status')]).isin({'IN PROGRESS','RETURNED'})]
@@ -134,21 +137,42 @@ def render(directory,manifest,pages):
                 st.caption(row['definition'])
                 if row['count'] is not None:
                     st.button('View matching records',key='queue_'+row['page'],on_click=navigate,args=(row['page'],row['rule'],row['table']),width='stretch')
-    view=st.selectbox('Executive visual',['Work-order health','Action queue','Overdue aging'],key='executive_visual')
-    if view=='Work-order health':
-        rows=[{'Workspace':page,'Status':name,'Records':values[name]} for page,values in stats.items() for name in ['Completed','Open','Cancelled']]
-        heading('DELIVERY HEALTH','Work orders by current status')
-        draw(pd.DataFrame(rows),{'mark':{'type':'bar','cornerRadiusEnd':3},'encoding':{'x':{'field':'Workspace','type':'nominal','axis':{'labelAngle':0,'title':None}},'y':{'field':'Records','type':'quantitative'},'color':{'field':'Status','type':'nominal','scale':{'domain':['Completed','Open','Cancelled'],'range':[INK,GOLD,SILVER]}},'tooltip':[{'field':'Workspace'},{'field':'Status'},{'field':'Records','type':'quantitative','format':','}]}},'executive_health',360)
-    elif view=='Action queue':
-        included=[r for r in data['rows'] if r['count'] is not None]
-        counts=pd.Series({r['page']:r['count'] for r in included})
-        heading('REVIEW PRIORITIES','Source records matching each workspace rule')
-        bars(counts.rename_axis('Workspace').reset_index(name='Records'),'Workspace','Records','executive_queue')
-        st.caption('Data-quality, feedback, and historical staffing exceptions are review counts, not verified unclosed tasks. See each card’s definition.')
-    else:
-        counts=pd.Series(data['aging'])
-        heading('BACKLOG RISK','Age of overdue open work orders')
-        left,right=st.columns([1.4,1])
-        with left:bars(counts.rename_axis('Age').reset_index(name='Work orders'),'Age','Work orders','executive_aging',vertical=True)
-        with right:ring(counts,'executive_aging_ring','Overdue')
-    st.caption('Calculated from the imported snapshot, not a live Power BI connection. Subcontractor renewal counts use Client AMC Status1, as confirmed.')
+    from interactive import chart, selection_values, excel_bytes
+    def status_click(key, page):
+        values = selection_values(st.session_state.get(key, {}))
+        if values:
+            rule = {'Open':'wo_open','Completed':'wo_completed','Cancelled':'wo_cancelled','Other':'wo_other'}[values[0]]
+            navigate(page, rule, 'Reactive')
+    st.caption('Click a work-order status bar to open its matching records. Select an action bar to open that workspace’s review queue.')
+    for column, (page, values) in zip(st.columns(len(stats)), stats.items()):
+        with column:
+            rows = [{'Category':label,'Records':values[name]} for label,name in [('Open','Open'),('Completed','Completed'),('Cancelled','Cancelled'),('Other','Other status')]]
+            key = 'summary_status_' + page
+            chart(pd.DataFrame(rows), key, lambda k=key,p=page: status_click(k,p), page)
+    left, right = st.columns(2)
+    with left:
+        included = [r for r in data['rows'] if r['count'] is not None]
+        def queue_click():
+            values = selection_values(st.session_state.get('summary_action_chart', {}))
+            row = next((r for r in included if r['page'] in values), None)
+            if row:
+                navigate(row['page'], row['rule'], row['table'])
+        chart(pd.DataFrame([{'Category':r['page'],'Records':r['count']} for r in included]),
+            'summary_action_chart', queue_click, 'Action queues')
+    with right:
+        st.markdown('**Work-order source**')
+        source = manifest.get('work_order_source')
+        if source:
+            st.write(source['name'])
+            st.caption('Technician: Assigned Resource. Blank names stay unassigned. This workbook has no verified due date; overdue counts are unavailable.')
+        else:
+            st.caption('Original Power BI snapshot. Open any status bar to inspect records.')
+    with st.expander('Executive records & Excel download'):
+        summary = pd.DataFrame(data['rows']).rename(columns={'page':'Workspace','count':'Matching records','total':'Total records','definition':'Counting rule'})
+        summary = summary[['Workspace','Matching records','Total records','Counting rule']]
+        st.dataframe(summary, hide_index=True, width='stretch')
+        st.download_button('Download executive summary · Excel',
+            data=lambda: excel_bytes(list(summary.columns), summary.itertuples(index=False, name=None)),
+            file_name='ABFM_Executive_Summary.xlsx',
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', on_click='ignore')
+    st.caption('Other datasets retain their Power BI snapshot dates; work orders use the separately labelled import. This is not a live Power BI connection. Subcontractor renewal counts use Client AMC Status1, as confirmed.')
