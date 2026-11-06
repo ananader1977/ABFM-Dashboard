@@ -3,11 +3,11 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import pandas as pd
 
-TASK_TYPES = {"Reactive": "BREAKDOWN", "PPM": "PPM", "Corrective": "SCHEDULEDTASK"}
+TASK_TYPES = {"Reactive": "BREAKDOWN", "PPM": "PPM", "Corrective": "SCHEDULEDTASK", "Pro-active": "PROACTIVE"}
 PAGE_TABLES = {
     "Asset Details": ["Asset Details", "Assets Tasks"],
     "KPI & MR": ["KPI", "Monthly Reports"],
-    "Reactive": ["Reactive"], "PPM": ["Reactive"], "Corrective": ["Reactive"],
+    "Reactive": ["Reactive"], "PPM": ["Reactive"], "Corrective": ["Reactive"], "Pro-active": ["Reactive"],
     "Quotations": ["Quotation"], "Unbilled Revenue": ["Unbilled"],
     "Customer Satisfaction": ["2023 Survey Details"], "Cheque Requests": ["Cheque Requests"],
     "MR tracker": ["MR Main Sheet"], "RFQ": ["RFQ"], "QHSE": ["QHSE"],
