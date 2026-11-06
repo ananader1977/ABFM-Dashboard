@@ -41,12 +41,6 @@ def install_replacement(source, root):
     manifest = json.loads((current / 'manifest.json').read_text())
     stage = Path(tempfile.mkdtemp(prefix='snapshot-wo-', dir=root))
     try:
-        for entry in manifest['tables'].values():
-            if entry['file'] != manifest['tables']['Reactive']['file']:
-                try:
-                    os.link(current / entry['file'], stage / entry['file'])
-                except OSError:
-                    shutil.copyfile(current / entry['file'], stage / entry['file'])
         output = stage / 'work_orders.parquet'
         writer = None
         count = 0
@@ -79,12 +73,19 @@ def install_replacement(source, root):
         if not count:
             raise ValueError('Replacement contains no records.')
         manifest['tables']['Reactive'] = {'file': output.name, 'rows': count, 'columns': columns}
+        manifest['tables'] = {'Reactive': manifest['tables']['Reactive']}
+        manifest['pages'] = [{'name':name,'visuals':[]} for name in TYPE_MAP]
+        manifest['work_orders_only'] = True
+        manifest['measures'] = []
+        manifest['import_warnings'] = []
+        manifest.pop('source_sha256', None)
         for page in manifest['pages']:
             if page['name'] in {'Reactive','PPM','Corrective'}:
                 page['visuals'] = []
         if not any(p['name'] == 'Pro-active' for p in manifest['pages']):
             manifest['pages'].insert(3, {'name':'Pro-active','visuals':[]})
         manifest['work_order_source'] = {'name':'Anas - All Work Orders.xlsx','rows':count,'counts':counts,'imported_at':datetime.now(timezone.utc).isoformat(),'technician_field':'Assigned Resource','previous_snapshot':current.name,'due_dates_available':False}
+        manifest['imported_at'] = manifest['work_order_source']['imported_at']
         (stage / 'manifest.json').write_text(json.dumps(manifest))
         pointer = root / 'current.replacement'
         pointer.write_text(stage.name)
@@ -93,3 +94,41 @@ def install_replacement(source, root):
     except Exception:
         shutil.rmtree(stage)
         raise
+
+
+def restrict_active_snapshot(root):
+    """Retire old datasets from the active snapshot while retaining recovery."""
+    pointer = root / 'current.txt'
+    if not pointer.exists():
+        return False
+    current = root / pointer.read_text().strip()
+    manifest = json.loads((current / 'manifest.json').read_text())
+    if not manifest.get('work_order_source') or manifest.get('work_orders_only'):
+        return False
+    stage = Path(tempfile.mkdtemp(prefix='snapshot-work-orders-only-', dir=root))
+    try:
+        info = manifest['tables']['Reactive']
+        os.link(current / info['file'], stage / info['file'])
+        manifest['tables'] = {'Reactive': info}
+        manifest['pages'] = [{'name':name,'visuals':[]} for name in TYPE_MAP]
+        manifest['measures'] = []
+        manifest['import_warnings'] = []
+        manifest['work_orders_only'] = True
+        manifest['retired_snapshot'] = current.name
+        manifest['imported_at'] = manifest['work_order_source']['imported_at']
+        (stage / 'manifest.json').write_text(json.dumps(manifest))
+        temp = root / 'current.work_orders_only'
+        temp.write_text(stage.name)
+        os.replace(temp, pointer)
+        return True
+    except Exception:
+        shutil.rmtree(stage)
+        raise
+
+
+def restore_snapshot(root, name):
+    if Path(name).name != name or not name.startswith('snapshot-') or not (root / name / 'manifest.json').is_file():
+        raise ValueError('Invalid snapshot selected.')
+    temp = root / 'current.restore'
+    temp.write_text(name)
+    os.replace(temp, root / 'current.txt')
