@@ -138,6 +138,9 @@ def render(directory,manifest,pages):
             with column,st.container(border=True):
                 value='—' if row['count'] is None else f"{row['count']:,}"
                 st.markdown(f'<div class="chart-kicker">{html.escape(row["page"])}</div><div class="queue-value">{value}</div><div class="queue-label">{html.escape(row["label"])}</div>',unsafe_allow_html=True)
+                percentage = None if row['count'] is None or not row['total'] else 100 * row['count'] / row['total']
+                share = '—' if percentage is None else f'{percentage:.2f}%'
+                st.markdown(f'<div class="queue-label"><strong>{share}</strong> of {row["total"]:,} workspace records</div>', unsafe_allow_html=True)
                 st.caption(row['definition'])
                 if row['count'] is not None:
                     st.button('View matching records',key='queue_'+row['page'],on_click=navigate,args=(row['page'],row['rule'],row['table']),width='stretch')
