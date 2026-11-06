@@ -109,9 +109,11 @@ def main():
     from security import apply_approved_admin_reset
     if apply_approved_admin_reset(root, os.environ.pop('ABFM_APPROVED_ADMIN_RESET', None)):
         print('Approved admin credential reset applied.', flush=True)
-    from work_orders import restrict_active_snapshot
+    from work_orders import restrict_active_snapshot, restore_requested_workspaces
     if restrict_active_snapshot(root):
         print('Activated work-order-only dataset; prior snapshot available for recovery.', flush=True)
+    if restore_requested_workspaces(root):
+        print('Restored MR tracker, RFQ and subcontractor workspaces; current work orders preserved.', flush=True)
     from parquet_layout import prepare_snapshot
     if prepare_snapshot(root):
         print("Prepared bounded data blocks for dashboard reads.", flush=True)
