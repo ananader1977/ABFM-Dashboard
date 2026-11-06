@@ -35,6 +35,8 @@ def apply_chart_filters(frame, selections, exclude=None):
 
 def selection_values(event):
     selection = event.get('selection', {}).get('pick', {})
+    if isinstance(selection, list):
+        return [row['Category'] for row in selection if isinstance(row, dict) and 'Category' in row]
     values = selection.get('Category', [])
     if not values:
         values = [v.get('Category') for v in selection.get('vlPoint', {}).get('or', []) if 'Category' in v]
