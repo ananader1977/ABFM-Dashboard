@@ -20,7 +20,7 @@ from visuals import CSS, page_header, polish, overview
 from executive import PAGE as EXECUTIVE_PAGE, render as executive_summary, scope_frame, clear_scope
 
 ROOT = Path(os.environ.get("ABFM_DATA_DIR", Path(__file__).parent / "data"))
-REMOVED_PAGES = {"Asset Details", "KPI & MR", "Quotations", "Cheque Request", "Cheque Requests", "QHSE"}
+REMOVED_PAGES = {"Asset Details", "KPI & MR", "Quotations", "Cheque Request", "Cheque Requests", "QHSE", "Manpower", "Manpower Management"}
 st.set_page_config(page_title="Al Bonian FM | Operations Intelligence", page_icon="🏢", layout="wide")
 st.markdown(CSS, unsafe_allow_html=True)
 
