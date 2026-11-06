@@ -34,7 +34,8 @@ def source_visuals(page):
 
 
 def work_order_columns(available, view, filter_fields=(), visual=None):
-    needed = {"Status", "Task Type", "Task Due Date", "Task Reported Date", "Category", "Priority", "Project Name", "Contract Title", "Contract In Charge", "Building", "Building Name", "Service Type", "Supervisor", "Trade", "SEGMET", "Categories"}
+    needed = {"Task Id", "Status", "Task Type", "Task Due Date", "Task Reported Date", "Category", "Priority", "Project Name", "Contract Title", "Contract In Charge", "Building", "Building Name", "Service Type", "Supervisor", "Trade", "SEGMET", "Categories"}
+    needed.update({"Technician · Assigned Resource", "Contract Manager (Contract)"})
     needed.update(filter_fields)
     if view == 'Source charts':
         needed.update({'Documents', 'Resources'})
@@ -68,6 +69,7 @@ def display_columns(available, table, view, filter_fields=(), visual=None):
         'Overall satisfaction with Al Bonian Facilities Management','Quality of our work','Our response time',
         'Courtesy and professionalism of our personnel','Task ID',
     }
+    needed.update({"Technician · Assigned Resource", "Contract Manager (Contract)"})
     needed.update(filter_fields)
     def fields(node):
         if isinstance(node, dict):
