@@ -116,16 +116,20 @@ def clear_scope():
 
 
 def render(directory,manifest,pages):
-    page_header(PAGE,manifest['imported_at'])
+    page_header(PAGE,manifest.get('work_order_source', {}).get('imported_at', manifest['imported_at']))
     with st.spinner('Preparing the executive overview…'):
         data=collect(str(directory),(directory/'manifest.json').stat().st_mtime_ns,tuple(pages))
     stats=data['work_orders']
     columns=st.columns(4)
-    columns[0].metric('Open work orders',f"{sum(v['Open'] for v in stats.values()):,}")
-    columns[1].metric('Overdue open work orders',f"{sum(v['Overdue open'] for v in stats.values()):,}" if data['due_available'] else '—')
-    rfq=next((r['count'] for r in data['rows'] if r['page']=='RFQ'),None)
-    columns[2].metric('Open RFQs','—' if rfq is None else f'{rfq:,}')
-    columns[3].metric('Positive unbilled balance · AED',f"{data['positive_balance']:,.2f}")
+    if manifest.get('work_orders_only'):
+        for column, label, metric in zip(columns, ['Total work orders','Completed work orders','Open work orders','Cancelled work orders'], ['Total work orders','Completed','Open','Cancelled']):
+            column.metric(label, f"{sum(v[metric] for v in stats.values()):,}")
+    else:
+        columns[0].metric('Open work orders',f"{sum(v['Open'] for v in stats.values()):,}")
+        columns[1].metric('Overdue open work orders',f"{sum(v['Overdue open'] for v in stats.values()):,}" if data['due_available'] else '—')
+        rfq=next((r['count'] for r in data['rows'] if r['page']=='RFQ'),None)
+        columns[2].metric('Open RFQs','—' if rfq is None else f'{rfq:,}')
+        columns[3].metric('Positive unbilled balance · AED',f"{data['positive_balance']:,.2f}")
     heading('OPEN WORK & ACTION QUEUE','Review records across your workspaces')
     st.caption('Each card shows its own rule. These counts are not added into a global total because workspaces can overlap and use different record units.')
     for offset in range(0,len(data['rows']),3):
@@ -175,4 +179,4 @@ def render(directory,manifest,pages):
             data=lambda: excel_bytes(list(summary.columns), summary.itertuples(index=False, name=None)),
             file_name='ABFM_Executive_Summary.xlsx',
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', on_click='ignore')
-    st.caption('Other datasets retain their Power BI snapshot dates; work orders use the separately labelled import. This is not a live Power BI connection. Subcontractor renewal counts use Client AMC Status1, as confirmed.')
+    st.caption('Only Anas - All Work Orders.xlsx is active. Counts use the confirmed status rules; cancellations remain separate.' if manifest.get('work_orders_only') else 'Calculated from imported snapshots. This is not a live Power BI connection.')
