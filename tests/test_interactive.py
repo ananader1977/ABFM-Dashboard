@@ -16,6 +16,7 @@ class InteractionTests(unittest.TestCase):
         self.assertEqual(list(apply_chart_filters(f,{'Status':['A'],MANAGER:['X']},exclude='Status').index),[2,5])
         self.assertEqual(selection_values({'selection':{'pick':{'Category':['A','B']}}}),['A','B'])
         self.assertEqual(selection_values({'selection':{'pick':{}}}),[])
+        self.assertEqual(selection_values({'selection':{'pick':[{'Category':'P3 - Medium'}]}}),['P3 - Medium'])
 
     def test_excel_export_filters_original_rows_and_preserves_literal_formula(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -53,7 +54,11 @@ class InteractionTests(unittest.TestCase):
             report=install_replacement(root/'new.parquet',root)
             new=root/(root/'current.txt').read_text()
             self.assertEqual(report['rows'],4)
-            self.assertEqual((old/'keep.parquet').read_bytes(),(new/'keep.parquet').read_bytes())
+            self.assertTrue((old/'keep.parquet').exists())
+            self.assertFalse((new/'keep.parquet').exists())
+            active=json.loads((new/'manifest.json').read_text())
+            self.assertEqual(set(active['tables']),{'Reactive'})
+            self.assertTrue(active['work_orders_only'])
             self.assertTrue((old/'old.parquet').exists())
             before=(root/'current.txt').read_text()
             dup=pd.concat([self.fixture(),self.fixture().iloc[:1]])
