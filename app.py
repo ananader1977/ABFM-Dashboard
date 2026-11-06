@@ -14,6 +14,8 @@ import streamlit as st
 from analytics import PAGE_TABLES, TASK_TYPES, aggregate, dates, field_reference, resolve, summarize, task_frame, source_filters
 from brand import LOGO
 from security import authenticate, connect, current_user, save_user, rename_user
+from interactive import linked_charts, quick_filters, records_panel
+from work_orders import install_replacement
 from measures import measure
 from data_access import load_table, load_rows, display_columns, source_visuals, SOURCE_VISUAL_TYPES
 from visuals import CSS, page_header, polish, overview
@@ -108,6 +110,17 @@ def admin_panel(user):
                 st.success(f"Imported {result['tables']} tables and {result['pages']} pages.")
             except Exception:
                 st.error("Import failed. The current snapshot was retained. Check that the PBIX contains an embedded data model.")
+    st.subheader("Replace work-order data")
+    st.caption("Replaces only work orders using the approved Excel fields and status rules; other datasets and the previous snapshot are retained. Upload the prepared Parquet version of the workbook.")
+    replacement = st.file_uploader("Prepared work-order data", type=["parquet"], key="replacement_work_order_upload")
+    if replacement and st.button("Apply replacement work orders"):
+        try:
+            with st.spinner("Validating and saving work orders…"):
+                report = install_replacement(replacement, ROOT)
+            st.cache_data.clear()
+            st.success(f"Replaced work orders: {report['rows']:,} records. Other datasets preserved.")
+        except (ValueError, KeyError) as error:
+            st.error(str(error))
     with st.expander("Account audit log"):
         with connect(ROOT) as db:
             audit = pd.read_sql_query("SELECT datetime(at,'unixepoch') AS utc_time, actor,action,target FROM audit ORDER BY at DESC LIMIT 100", db)
@@ -270,7 +283,9 @@ def run():
         executive_summary(directory,manifest,available_pages)
         return
     page = next(p for p in manifest["pages"] if p["name"] == page_name)
-    page_header(page_name, manifest['imported_at'])
+    page_header(page_name, manifest.get('work_order_source', {}).get('imported_at', manifest['imported_at']) if page_name in TASK_TYPES else manifest['imported_at'])
+    if page_name in TASK_TYPES and manifest.get('work_order_source'):
+        st.caption('Work-order source: Anas - All Work Orders.xlsx · Assigned Resource supplies technician. Scheduled, In Progress and Unscheduled are open; Completed is completed; Canceled is separate. This source has no verified due date, so overdue charts are skipped.')
     tables = [t for t in PAGE_TABLES.get(page_name, []) if t in manifest["tables"]]
     if not tables:
         st.warning("The source tables for this page are unavailable. Charts have been skipped.")
@@ -294,7 +309,11 @@ def run():
         except KeyError:
             st.warning('This snapshot no longer contains the fields for that executive rule. Clear the selection to view all records.')
             st.stop()
-    selected = filters(frame, table, info['columns'])
+    if table == 'Reactive' and 'Technician · Assigned Resource' not in frame:
+        st.info('This older snapshot has no verified Assigned Resource or Contract Manager fields. No names have been inferred.')
+    frame = quick_filters(frame, page_name)
+    selected = filters(frame, table, list(frame.columns))
+    selected = linked_charts(selected, table, page_name)
     st.caption(f"{len(selected):,} selected records / {tab_total:,} records in this tab • Dataset: {table}")
     metrics, insights = summarize(selected, table, page_name)
     metric_cards(metrics)
@@ -306,7 +325,7 @@ def run():
     # the chosen view so login does not build all source figures at once.
     view = st.radio("View", ["Overview", "Source charts", "Records", "Definitions & skipped charts"], horizontal=True, key=f"view_{page_name}")
     if view == "Overview":
-        overview(selected, table, page_name)
+        st.caption("The compact charts above filter all metrics and the records below.")
     elif view == "Source charts":
         skipped = source_charts(page, selected, table)
         if skipped:
@@ -324,13 +343,14 @@ def run():
             st.info("Choose at least one visible column.")
         st.caption(f"Page {page_number:,} of {page_count:,}. View-only data; no record editing is enabled.")
     elif view == "Definitions & skipped charts":
-        st.write("Work orders: BREAKDOWN → Reactive; PPM → PPM; SCHEDULEDTASK → Corrective. COMPLETE and HISTORY are completed; ACTIVE and ASSIGNED are open; CANCELLED is separate. Completion percentage = completed ÷ (total − cancelled). Unknown statuses remain separate.")
+        st.write("Work orders: BREAKDOWN → Reactive; PPM → PPM; SCHEDULEDTASK → Corrective. COMPLETE and HISTORY are completed; ACTIVE and ASSIGNED are open; CANCELLED is separate. Completion percentage = completed ÷ (total − cancelled). Replacement workbook: Reactive → BREAKDOWN; PPM → PPM; Corrective → SCHEDULEDTASK; Pro-active → PROACTIVE. Scheduled and Unscheduled → ACTIVE; In Progress → ASSIGNED; Completed → COMPLETE; Canceled → CANCELLED. Unknown statuses remain separate.")
         st.write("Dates are evaluated against today's date in Dubai. Imported calculated columns retain their snapshot values. Figures count rows unless labelled otherwise. Each dataset is filtered independently; no cross-table relationship or DAX result is inferred.")
         st.write("The original page names and source tables are retained. The application uses a responsive layout; Power BI custom visuals, bookmarks, drill-through, complex saved visual conditions, and unsupported DAX calculations are not reproduced automatically. Missing-field charts are skipped.")
         if manifest.get("import_warnings"):
             st.write("Import exceptions: invalid source dates were retained as missing values.")
             st.dataframe(pd.DataFrame(manifest["import_warnings"]), hide_index=True)
         st.caption("Select a visual under Source charts to see its conversion result or the reason it was skipped. Custom visual types and decorative objects are outside automatic conversion.")
+    records_panel(selected, path, table, page_name, info['columns'], TASK_TYPES.get(page_name))
 
 
 run()
