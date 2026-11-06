@@ -96,6 +96,13 @@ def install_replacement(source, root):
         raise
 
 
+def link_or_copy(source, destination):
+    try:
+        os.link(source, destination)
+    except OSError:
+        shutil.copyfile(source, destination)
+
+
 def restrict_active_snapshot(root):
     """Retire old datasets from the active snapshot while retaining recovery."""
     pointer = root / 'current.txt'
@@ -103,12 +110,12 @@ def restrict_active_snapshot(root):
         return False
     current = root / pointer.read_text().strip()
     manifest = json.loads((current / 'manifest.json').read_text())
-    if not manifest.get('work_order_source') or manifest.get('work_orders_only'):
+    if not manifest.get('work_order_source') or manifest.get('work_orders_only') or manifest.get('requested_restored_pages'):
         return False
     stage = Path(tempfile.mkdtemp(prefix='snapshot-work-orders-only-', dir=root))
     try:
         info = manifest['tables']['Reactive']
-        os.link(current / info['file'], stage / info['file'])
+        link_or_copy(current / info['file'], stage / info['file'])
         manifest['tables'] = {'Reactive': info}
         manifest['pages'] = [{'name':name,'visuals':[]} for name in TYPE_MAP]
         manifest['measures'] = []
@@ -132,3 +139,57 @@ def restore_snapshot(root, name):
     temp = root / 'current.restore'
     temp.write_text(name)
     os.replace(temp, root / 'current.txt')
+
+
+RESTORED_PAGES = {'MR tracker':'MR Main Sheet','RFQ':'RFQ','SubContractors Agrements':'Subcontractor AMC'}
+
+
+def restore_requested_workspaces(root):
+    """Restore precisely the three user-selected datasets, keeping current work orders."""
+    pointer = root / 'current.txt'
+    current = root / pointer.read_text().strip()
+    manifest = json.loads((current / 'manifest.json').read_text())
+    if not manifest.get('work_order_source') or manifest.get('requested_restored_pages') == list(RESTORED_PAGES):
+        return False
+    # Follow recorded snapshot lineage rather than selecting an arbitrary old dataset.
+    sources = {}
+    previous = manifest.get('retired_snapshot') or manifest['work_order_source'].get('previous_snapshot')
+    visited = set()
+    while previous and previous not in visited and len(visited) < 20:
+        if Path(previous).name != previous:
+            raise ValueError('Invalid prior snapshot path.')
+        visited.add(previous)
+        directory = root / previous
+        old = json.loads((directory / 'manifest.json').read_text())
+        for page, table in RESTORED_PAGES.items():
+            if table in old['tables'] and table not in sources:
+                sources[table] = (directory, old['tables'][table], old.get('page_imported_at', {}).get(page, old['imported_at']), next((p for p in old['pages'] if p['name'] == page), {'name':page,'visuals':[]}))
+        if len(sources) == len(RESTORED_PAGES):
+            break
+        previous = old.get('retired_snapshot') or old.get('work_order_source', {}).get('previous_snapshot')
+    if len(sources) != len(RESTORED_PAGES):
+        raise ValueError('The prior snapshot does not contain all three requested workspaces.')
+    stage = Path(tempfile.mkdtemp(prefix='snapshot-restored-workspaces-', dir=root))
+    try:
+        for info in manifest['tables'].values():
+            link_or_copy(current / info['file'], stage / info['file'])
+        manifest.setdefault('page_imported_at', {})
+        for page, table in RESTORED_PAGES.items():
+            directory, info, stamp, definition = sources[table]
+            # Assign a distinct file name to avoid collisions across source snapshots.
+            name = 'restored_' + table.replace(' ', '_') + '.parquet'
+            link_or_copy(directory / info['file'], stage / name)
+            manifest['tables'][table] = dict(info, file=name)
+            manifest['pages'] = [p for p in manifest['pages'] if p['name'] != page] + [definition]
+            manifest['page_imported_at'][page] = stamp
+        manifest['work_orders_only'] = False
+        manifest['requested_restored_pages'] = list(RESTORED_PAGES)
+        manifest['restoration_previous_snapshot'] = current.name
+        (stage / 'manifest.json').write_text(json.dumps(manifest))
+        temporary = root / 'current.restore_workspaces'
+        temporary.write_text(stage.name)
+        os.replace(temporary, pointer)
+        return True
+    except Exception:
+        shutil.rmtree(stage)
+        raise
