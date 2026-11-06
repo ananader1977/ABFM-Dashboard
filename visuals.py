@@ -180,7 +180,7 @@ def overview(frame, table, page):
     end=field(frame,['Ending Date'] if table=='AMC' else ['End Date '] if table=='Subcontractor AMC' else [])
     if end:choices.append('Contract horizons')
     if table=='2023 Survey Details' and any(field(frame,[v]) for v in SURVEY_FIELDS.values()):choices.append('Satisfaction profile')
-    lens=st.selectbox('Visual analysis',choices,key=prefix+'_lens')
+    lens=st.selectbox('Additional analysis',choices,key=prefix+'_lens')
     if frame.empty:
         st.info('There are no records for the current filters.')
         return
@@ -190,7 +190,7 @@ def overview(frame, table, page):
             return
         primary=field(frame,['Status']) or dims[0]
         options=[c for c in dims if c!=primary] or dims
-        group=st.selectbox('Breakdown by',options,key=prefix+'_group')
+        group=st.selectbox('Category field',options,key=prefix+'_group')
         left,right=st.columns([.95,1.35],gap='large')
         with left:
             heading('PORTFOLIO MIX', 'Work-order status' if table=='Reactive' else primary)
