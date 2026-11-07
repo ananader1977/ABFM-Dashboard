@@ -28,6 +28,7 @@ def scope_frame(frame, rule):
     if isinstance(rule,dict) and rule.get('kind') == 'rfq_assignee':
         from escalation import ASSIGNEE, key
         return frame.loc[normalized(frame.Status).isin({'IN PROGRESS','RETURNED'}) & frame[ASSIGNEE].map(key).eq(key(rule['name']))]
+    if rule=='agreements_expired':return frame.loc[dates(frame['End Date ']).lt(today())]
     if rule=='wo_completed':return frame.loc[normalized(frame[resolve(frame,'Status')]).isin(COMPLETED)]
     if rule=='wo_cancelled':return frame.loc[normalized(frame[resolve(frame,'Status')]).eq('CANCELLED')]
     if rule=='wo_other':return frame.loc[~normalized(frame[resolve(frame,'Status')]).isin(OPEN | COMPLETED | {'CANCELLED'})]
