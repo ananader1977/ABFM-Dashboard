@@ -231,7 +231,7 @@ def send_groups(groups,config,source_date,test=False):
     if test:
         # Two test messages: one combined example for each escalation stream.
         groups=[{'kind':kind,'to':test_to,'cc':[], 'records':[row for g in groups if g['kind']==kind for row in g['records']]} for kind in ['Operations','Procurement'] if any(g['kind']==kind for g in groups)]
-    messages=[build_email(g,smtp['sender'],source_date,test_to if test else None) for g in groups]
+    messages=[build_email(g,smtp['sender'],source_date.get(g['kind'],'Unknown') if isinstance(source_date,dict) else source_date,test_to if test else None) for g in groups]
     # Always encrypt transport and require authenticated SMTP.
     port=int(smtp['port'] or 587)
     client=smtplib.SMTP_SSL(smtp['host'],port,timeout=30,context=ssl.create_default_context()) if port==465 else smtplib.SMTP(smtp['host'],port,timeout=30)
@@ -240,6 +240,11 @@ def send_groups(groups,config,source_date,test=False):
         client.login(smtp['username'],smtp['password'])
         for message in messages:client.send_message(message)
     return len(messages)
+
+
+def source_dates(manifest):
+    return {'Operations':manifest.get('work_order_source',{}).get('imported_at',manifest['imported_at']),
+            'Procurement':manifest.get('page_imported_at',{}).get('RFQ',manifest['imported_at'])}
 
 
 def run_daily(root,now=None):
@@ -260,7 +265,7 @@ def run_daily(root,now=None):
                 ledger.execute('INSERT INTO deliveries VALUES(?,?,?)',(delivery_id,'sending',now.isoformat()));ledger.commit()
             except sqlite3.IntegrityError:continue
             try:
-                send_groups([group],config,manifest.get('work_order_source',{}).get('imported_at',manifest['imported_at']))
+                send_groups([group],config,source_dates(manifest))
                 ledger.execute('UPDATE deliveries SET status=? WHERE id=?',('sent',delivery_id));ledger.commit()
             except Exception:
                 # Delivery may have reached SMTP before a timeout. Do not blindly resend.
@@ -372,12 +377,12 @@ def admin_panel(root):
             else:save_config(root,candidate);config=candidate;st.success('Email settings saved. Daily time: 08:00 Dubai.')
     if st.button('Send test escalation to test recipient only'):
         try:
-            count=send_groups(groups,config,manifest.get('work_order_source',{}).get('imported_at',manifest['imported_at']),test=True)
+            count=send_groups(groups,config,source_dates(manifest),test=True)
             st.success(f'{count} test email(s) sent to the test recipient only. No production CC recipients were used.')
         except Exception as exc:st.error(str(exc))
     if st.button('Send live escalation emails now'):
         try:
-            count=send_groups(groups,config,manifest.get('work_order_source',{}).get('imported_at',manifest['imported_at']))
+            count=send_groups(groups,config,source_dates(manifest))
             st.success(f'{count} escalation email(s) accepted by the SMTP server.')
         except Exception as exc:st.error(str(exc))
     report=Path(root)/'escalation_last_run.json'
