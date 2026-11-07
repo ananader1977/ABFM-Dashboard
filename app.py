@@ -18,7 +18,7 @@ from interactive import linked_charts, quick_filters, records_panel
 from work_orders import install_replacement
 from measures import measure
 from data_access import load_table, load_rows, display_columns, source_visuals, SOURCE_VISUAL_TYPES
-from visuals import CSS, page_header, polish, overview
+from visuals import CSS, page_header, polish, overview, styled_metric
 from executive import PAGE as EXECUTIVE_PAGE, render as executive_summary, scope_frame, clear_scope
 
 ROOT = Path(os.environ.get("ABFM_DATA_DIR", Path(__file__).parent / "data"))
@@ -158,11 +158,12 @@ def filters(frame, table, source_columns=None):
 
 def metric_cards(metrics):
     entries = list(metrics.items())
+    completion = next((value for label, value in entries if "completion" in label.lower() and "%" in label), None)
     for offset in range(0, len(entries), 4):
         columns = st.columns(4)
         for column, (label, value) in zip(columns, entries[offset:offset + 4]):
             display = "—" if value is None else f"{value:,.1f}%" if "%" in label else f"{value:,.2f}" if "AED" in label else f"{value:,.0f}"
-            column.metric(label, display)
+            styled_metric(column, label, display, percentage=completion, key=label)
 
 
 def source_charts(page, frame, table):
