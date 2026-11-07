@@ -1,6 +1,7 @@
 """Recipient-scoped escalation attachments using the application theme."""
 import base64
 import html
+import re
 from io import BytesIO
 import pandas as pd
 from reportlab.lib import colors
@@ -15,10 +16,22 @@ DISPLAY_NAMES = {
     'Akhil Raveendran Nair Raveendran Nair': 'Akhil Nair',
     'Varughese Mathew Othikkamannil Ninan Varughese': 'Varughese Mathew',
     'Pragneshkumar Pravinbhai Patel': 'Pragneshkumar Patel',
+    '# Rafik Jabbour':'Rafik Jabbour',
+    '# Rafik Jabour':'Rafik Jabbour',
+    '#Rafik Jabbour':'Rafik Jabbour',
+    '#Rafik Jabour':'Rafik Jabbour',
+    '# Sanjay Sonu Shirodkar':'Sanjay Shirodkar',
+    '#Sanjay Sonu Shirodkar':'Sanjay Shirodkar',
+    '# Sanjay Shirodkar':'Sanjay Shirodkar',
+    '#Sanjay Shirodkar':'Sanjay Shirodkar',
+    'Sanjay Sonu Shirodkar':'Sanjay Shirodkar',
 }
 
 def display_name(value):
-    return DISPLAY_NAMES.get(str(value).strip(), str(value).strip())
+    value=str(value).strip()
+    canonical={'rafik jabbour':'Rafik Jabbour','rafik jabour':'Rafik Jabbour','sanjay shirodkar':'Sanjay Shirodkar','sanjay sonu shirodkar':'Sanjay Shirodkar'}
+    normalized=' '.join(re.sub(r'^[#\s]+','',value).casefold().split())
+    return canonical.get(normalized,DISPLAY_NAMES.get(value,value))
 
 def cell(value):
     return '' if value is None or pd.isna(value) else str(value)
