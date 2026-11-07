@@ -22,7 +22,8 @@ MANAGER = 'Contract Manager (Contract)'
 
 
 def labels(series):
-    return series.astype('string[pyarrow]').fillna(MISSING).replace('', MISSING)
+    from mail_reports import DISPLAY_NAMES
+    return series.astype('string[pyarrow]').fillna(MISSING).replace('', MISSING).replace(DISPLAY_NAMES)
 
 
 def apply_chart_filters(frame, selections, exclude=None):
