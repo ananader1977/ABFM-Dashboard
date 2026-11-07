@@ -72,7 +72,7 @@ def chart(data, key, callback, title, horizontal=True):
             'opacity': {'condition': {'param': 'pick', 'value': 1}, 'value': .25},
             'tooltip': [{'field': 'Category'}, {'field': 'Records', 'type': 'quantitative', 'format': ','}]
         },
-        'config': {'view': {'stroke': None}, 'axis': {'labelColor': INK, 'titleColor': INK, 'gridColor': '#eae5da'}}
+        'config': {'font':'Calibri','view': {'stroke': None}, 'axis': {'labelColor': INK, 'titleColor': INK, 'gridColor': '#eae5da'}}
     }
     return st.vega_lite_chart(data, spec, key=key, on_select=callback, selection_mode='pick', width='stretch')
 
