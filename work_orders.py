@@ -12,7 +12,7 @@ import pyarrow.parquet as pq
 from interactive import TECHNICIAN, MANAGER
 
 TYPE_MAP = {'Reactive':'BREAKDOWN','PPM':'PPM','Corrective':'SCHEDULEDTASK','Pro-active':'PROACTIVE'}
-STATUS_MAP = {'Completed':'COMPLETE','Scheduled':'ACTIVE','In Progress':'ASSIGNED','Unscheduled':'ACTIVE','Canceled':'CANCELLED'}
+STATUS_MAP = {'Completed':'COMPLETE','Scheduled':'ACTIVE','In Progress':'ASSIGNED','Unscheduled':'ACTIVE','Canceled':'CANCELLED','Cancelled':'CANCELLED'}
 
 
 def canonicalize(frame):
@@ -36,7 +36,124 @@ def canonicalize(frame):
     return result
 
 
-def install_replacement(source, root):
+REQUIRED_EXCEL_COLUMNS = ['WO No.','Work Order Type','System Status','Priority','Assigned Resource','Contract Manager (Contract) (Contract)','Created On']
+
+
+def _excel_open(source):
+    from openpyxl import load_workbook
+    from openpyxl.utils.exceptions import InvalidFileException
+    from zipfile import BadZipFile
+    if hasattr(source,'seek'):source.seek(0)
+    try:return load_workbook(source,read_only=True,data_only=True,keep_links=False)
+    except (InvalidFileException,BadZipFile,OSError,ValueError,EOFError) as exc:
+        raise ValueError('Cannot read this workbook. Upload a valid, unencrypted Excel .xlsx file.') from exc
+
+
+def excel_sheet_names(source):
+    book=_excel_open(source)
+    try:return list(book.sheetnames)
+    finally:book.close()
+
+
+def _excel_rows(book,sheet_name):
+    if sheet_name not in book.sheetnames:raise ValueError('The selected worksheet is missing from this workbook.')
+    sheet=book[sheet_name]
+    # Some exports report incorrect worksheet dimensions. Stream the actual XML rows.
+    sheet.reset_dimensions()
+    rows=sheet.iter_rows(values_only=True)
+    first=next(rows,())
+    headers=['' if value is None else str(value).strip() for value in first]
+    while headers and not headers[-1]:headers.pop()
+    if not headers or any(not name for name in headers):raise ValueError('The first worksheet row must contain column headings without gaps.')
+    if len({name.casefold() for name in headers})!=len(headers):raise ValueError('Duplicate column headings are not allowed.')
+    missing=[name for name in REQUIRED_EXCEL_COLUMNS if name not in headers]
+    if missing:raise ValueError('Missing required columns: '+', '.join(missing)+'. Select the work-order sheet, with headings in row 1.')
+    return headers,rows
+
+
+def preview_excel(source,sheet_name):
+    book=_excel_open(source)
+    try:
+        headers,rows=_excel_rows(book,sheet_name)
+        samples=[]
+        for values in rows:
+            if any(value is not None and str(value).strip() for value in values):
+                samples.append(list(values[:len(headers)])+[None]*max(0,len(headers)-len(values)))
+                if len(samples)==5:break
+        if not samples:raise ValueError('The selected worksheet contains no work-order records.')
+        return pd.DataFrame(samples,columns=headers)
+    finally:book.close()
+
+
+def _excel_date(value,epoch,row_number):
+    from datetime import date,datetime
+    from openpyxl.utils.datetime import from_excel
+    try:
+        if isinstance(value,(int,float)) and not isinstance(value,bool):
+            if not 1 <= value <= 100000:raise ValueError()
+            result=pd.Timestamp(from_excel(value,epoch))
+        elif isinstance(value,(date,datetime)):
+            result=pd.Timestamp(value)
+        elif isinstance(value,str) and value.strip():
+            import re
+            value=value.strip()
+            if re.match(r'^\d{4}-\d{2}-\d{2}',value):result=pd.Timestamp(value)
+            else:
+                result=None
+                for fmt in ['%d/%m/%Y %H:%M:%S','%d/%m/%Y %H:%M','%d/%m/%Y','%d-%m-%Y']:
+                    try:result=pd.Timestamp(datetime.strptime(value,fmt));break
+                    except ValueError:pass
+                if result is None:raise ValueError()
+        else:raise ValueError()
+        if pd.isna(result):raise ValueError()
+        if result.tzinfo is not None:result=result.tz_convert('Asia/Dubai').tz_localize(None)
+        return result.to_pydatetime()
+    except (ValueError,TypeError,OverflowError) as exc:
+        raise ValueError(f'Excel row {row_number}: Created On must be a valid Excel date or date text (YYYY-MM-DD or DD/MM/YYYY).') from exc
+
+
+def install_excel_replacement(source,root,sheet_name):
+    """Read Excel in small batches; activate only a completely validated snapshot."""
+    from datetime import date,datetime
+    root=Path(root)
+    book=_excel_open(source)
+    try:
+        headers,rows=_excel_rows(book,sheet_name)
+        schema=pa.schema([pa.field(name,pa.timestamp('ns') if name=='Created On' else pa.string()) for name in headers])
+        types={name.casefold():name for name in TYPE_MAP}
+        statuses={name.casefold():name for name in STATUS_MAP}
+        with tempfile.TemporaryDirectory(prefix='excel-import-',dir=root) as directory:
+            prepared=Path(directory)/'validated.parquet'
+            with pq.ParquetWriter(prepared,schema) as writer:
+                batch=[]
+                for row_number,values in enumerate(rows,start=2):
+                    if not any(value is not None and str(value).strip() for value in values):continue
+                    if any(value is not None and str(value).strip() for value in values[len(headers):]):raise ValueError(f'Excel row {row_number}: values extend beyond the column headings.')
+                    record={}
+                    for i,name in enumerate(headers):
+                        value=values[i] if i<len(values) else None
+                        if name=='Created On':record[name]=_excel_date(value,book.epoch,row_number)
+                        elif value is None:record[name]=None
+                        elif name=='WO No.' and isinstance(value,(int,float)) and not isinstance(value,bool):
+                            if not float(value).is_integer():raise ValueError(f'Excel row {row_number}: WO No. must be a whole number or text identifier.')
+                            record[name]=str(int(value))
+                        elif isinstance(value,(date,datetime)):record[name]=value.isoformat()
+                        else:record[name]=str(value).strip() or None
+                    kind=types.get(str(record['Work Order Type']).casefold())
+                    if not kind:raise ValueError(f'Excel row {row_number}: Work Order Type must be Reactive, PPM, Corrective or Pro-active.')
+                    status=statuses.get(str(record['System Status']).casefold())
+                    if not status:raise ValueError(f'Excel row {row_number}: unknown System Status. Use Completed, Scheduled, In Progress, Unscheduled or Canceled/Cancelled.')
+                    if not record['WO No.']:raise ValueError(f'Excel row {row_number}: WO No. is missing.')
+                    record['Work Order Type']=kind;record['System Status']=status;batch.append(record)
+                    if len(batch)==512:
+                        writer.write_table(pa.Table.from_pylist(batch,schema=schema),row_group_size=512);batch=[]
+                if batch:writer.write_table(pa.Table.from_pylist(batch,schema=schema),row_group_size=512)
+            source_name=Path(str(getattr(source,'name',source))).name
+            return install_replacement(prepared,root,source_name=source_name,sheet_name=sheet_name)
+    finally:book.close()
+
+
+def install_replacement(source, root, source_name="Anas - All Work Orders.xlsx", sheet_name=None):
     current = root / (root / 'current.txt').read_text().strip()
     manifest = json.loads((current / 'manifest.json').read_text())
     stage = Path(tempfile.mkdtemp(prefix='snapshot-wo-', dir=root))
@@ -46,6 +163,7 @@ def install_replacement(source, root):
         count = 0
         ids = set()
         counts = {}
+        blank_priorities = 0
         columns = None
         try:
             incoming = pq.ParquetFile(source)
@@ -55,6 +173,7 @@ def install_replacement(source, root):
             out_schema = pa.schema([f for f in incoming.schema_arrow if f.name not in {c.name for c in canonical_fields}] + canonical_fields)
             for batch in incoming.iter_batches(batch_size=512):
                 frame = canonicalize(batch.to_pandas())
+                blank_priorities += int(frame['Priority'].astype('string').fillna('').str.strip().eq('').sum()) if 'Priority' in frame else len(frame)
                 for value in frame['Task Id']:
                     if pd.isna(value) or not str(value).strip() or value in ids:
                         raise ValueError('Missing or duplicate WO No.; replacement was not applied.')
@@ -73,9 +192,14 @@ def install_replacement(source, root):
         if not count:
             raise ValueError('Replacement contains no records.')
         manifest['tables']['Reactive'] = {'file': output.name, 'rows': count, 'columns': columns}
-        manifest['tables'] = {'Reactive': manifest['tables']['Reactive']}
-        manifest['pages'] = [{'name':name,'visuals':[]} for name in TYPE_MAP]
-        manifest['work_orders_only'] = True
+        for table_name, info in manifest['tables'].items():
+            if table_name != 'Reactive' and not (stage / info['file']).exists():
+                link_or_copy(current / info['file'], stage / info['file'])
+        for page in manifest['pages']:
+            if page['name'] not in TYPE_MAP:
+                manifest.setdefault('page_imported_at',{}).setdefault(page['name'],manifest['imported_at'])
+        manifest['pages'] = [{'name':name,'visuals':[]} for name in TYPE_MAP] + [p for p in manifest['pages'] if p['name'] not in TYPE_MAP]
+        manifest['work_orders_only'] = len(manifest['tables']) == 1
         manifest['measures'] = []
         manifest['import_warnings'] = []
         manifest.pop('source_sha256', None)
@@ -84,7 +208,7 @@ def install_replacement(source, root):
                 page['visuals'] = []
         if not any(p['name'] == 'Pro-active' for p in manifest['pages']):
             manifest['pages'].insert(3, {'name':'Pro-active','visuals':[]})
-        manifest['work_order_source'] = {'name':'Anas - All Work Orders.xlsx','rows':count,'counts':counts,'imported_at':datetime.now(timezone.utc).isoformat(),'technician_field':'Assigned Resource','previous_snapshot':current.name,'due_dates_available':False}
+        manifest['work_order_source'] = {'name':source_name,'sheet':sheet_name,'blank_priority_rows':blank_priorities,'rows':count,'counts':counts,'imported_at':datetime.now(timezone.utc).isoformat(),'technician_field':'Assigned Resource','previous_snapshot':current.name,'due_dates_available':False}
         manifest['imported_at'] = manifest['work_order_source']['imported_at']
         (stage / 'manifest.json').write_text(json.dumps(manifest))
         pointer = root / 'current.replacement'
