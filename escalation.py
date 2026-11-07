@@ -302,6 +302,7 @@ def executive_panels(directory,manifest):
 
 def review_cards(directory,manifest):
     import streamlit as st
+    from visuals import styled_metric
     rows=[row for row in manager_counts(directory,manifest) if row['open'] > 0]
     def open_manager(name,kind,variants):
         from executive import navigate
@@ -311,12 +312,12 @@ def review_cards(directory,manifest):
         for col,row in zip(st.columns(4),rows[offset:offset+4]):
             with col,st.container(border=True):
                 st.markdown('**'+row['name']+'**')
-                st.metric('Open Reactive / Corrective / Pro-active',f"{row['open']:,}")
+                styled_metric(st, 'Open Reactive / Corrective / Pro-active', f"{row['open']:,}", key='manager_'+hashlib.sha256(row['name'].encode()).hexdigest()[:12])
                 st.caption(' · '.join(f'{k}: {row[k]:,}' for k in ['Reactive','Corrective','Pro-active']))
                 for kind in ['Reactive','Corrective','Pro-active']:
                     if row[kind]:st.button(f'View {kind} ({row[kind]:,})',key='manager_'+row['name']+'_'+kind,on_click=open_manager,args=(row['name'],kind,row['aliases'][kind]))
                 pct=100*row['open']/row['total'] if row['total'] else 0
-                color='#b42318' if pct>5 else '#16703d' if pct<5 else '#65758a'
+                color='#b42318'
                 st.markdown(f'<span style="color:{color};font-weight:700">{pct:.2f}%</span> of {row["total"]:,} work orders',unsafe_allow_html=True)
     rfqs=open_rfqs(directory,manifest)
     st.markdown('**Open RFQs by procurement staff**')
@@ -325,11 +326,11 @@ def review_cards(directory,manifest):
         for offset in range(0,len(counts),4):
             for col,(name,count) in zip(st.columns(4),list(counts.items())[offset:offset+4]):
                 with col,st.container(border=True):
-                    st.metric(str(name),f'{count:,}')
+                    styled_metric(st, 'Open RFQs · '+str(name), f'{count:,}', key='rfq_staff_'+hashlib.sha256(str(name).encode()).hexdigest()[:12])
                     from executive import navigate
                     st.button('View open RFQs',key='rfq_staff_'+str(name),on_click=navigate,args=('RFQ',{'kind':'rfq_assignee','name':str(name)},'RFQ'))
-                    pct=100*count/len(rfqs);color='#b42318' if pct>5 else '#16703d' if pct<5 else '#65758a'
-                    st.markdown(f'<span style="color:{color}">{pct:.2f}%</span> of {len(rfqs):,} open RFQs',unsafe_allow_html=True)
+                    pct=100*count/len(rfqs);color='#b42318'
+                    st.markdown(f'<span style="color:{color};font-weight:700">{pct:.2f}%</span> of {len(rfqs):,} open RFQs',unsafe_allow_html=True)
     else:st.info('No open RFQs in this snapshot.')
 
 
