@@ -529,7 +529,7 @@ def review_cards(directory,manifest):
     rows=[row for row in manager_counts(directory,manifest) if row['open'] > 0]
     def open_manager(name,kind,variants):
         from executive import navigate
-        st.session_state['quick_'+kind+'_Contract Manager (Contract)'] = ['(Not specified)' if variant=='(Not assigned)' else display_name(variant) for variant in variants]
+        st.session_state['quick_'+kind+'_Contract Manager (Contract)'] = list(dict.fromkeys('(Not specified)' if variant=='(Not assigned)' else display_name(variant) for variant in variants))
         navigate(kind,'wo_open','Reactive')
     for offset in range(0,len(rows),4):
         for col,row in zip(st.columns(4),rows[offset:offset+4]):
