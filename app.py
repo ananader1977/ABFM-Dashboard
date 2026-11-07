@@ -344,7 +344,8 @@ def run():
         start = (int(page_number) - 1) * page_size
         if visible:
             displayed = load_rows(str(path), TASK_TYPES.get(page_name), visible, selected.index[start:start + page_size])
-            st.dataframe(displayed, hide_index=True, use_container_width=True)
+            from mail_reports import DISPLAY_NAMES
+            st.dataframe(displayed.replace(DISPLAY_NAMES), hide_index=True, use_container_width=True)
         else:
             st.info("Choose at least one visible column.")
         st.caption(f"Page {page_number:,} of {page_count:,}. View-only data; no record editing is enabled.")
