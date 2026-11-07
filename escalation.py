@@ -247,15 +247,35 @@ def validate_sender(config):
     return settings
 
 
+class SMTPStageError(ValueError):
+    def __init__(self,stage,exc):
+        self.stage=stage
+        detail=('The server closed the connection or did not send an SMTP greeting in time.' if isinstance(exc,smtplib.SMTPServerDisconnected) else email_error(exc))
+        super().__init__('Email connection failed during '+stage+'. '+detail)
+
+
 @contextmanager
 def smtp_connection(config):
     settings=validate_sender(config)
     port=int(settings['port'] or 587)
-    client=smtplib.SMTP_SSL(settings['host'],port,timeout=12,context=ssl.create_default_context()) if port==465 else smtplib.SMTP(settings['host'],port,timeout=12)
-    with client:
-        if port!=465:client.starttls(context=ssl.create_default_context())
+    client=None
+    stage='server connection / greeting'
+    try:
+        client=smtplib.SMTP_SSL(settings['host'],port,timeout=30,context=ssl.create_default_context()) if port==465 else smtplib.SMTP(settings['host'],port,timeout=30)
+        if port!=465:
+            stage='encrypted TLS setup'
+            client.starttls(context=ssl.create_default_context())
+        stage='Gmail authentication'
         client.login(settings['username'],settings['password'])
+    except Exception as exc:
+        if client:client.close()
+        LOG.error('Escalation SMTP stage failed: %s (%s)',stage,type(exc).__name__)
+        raise SMTPStageError(stage,exc) from None
+    try:
         yield client
+    finally:
+        try:client.quit()
+        except Exception:client.close()
 
 
 def email_error(exc):
@@ -341,6 +361,13 @@ def run_daily(root,now=None):
 
 def start_scheduler(root):
     def loop():
+        try:
+            startup_config=load_config(root)
+            if sender_status(startup_config)['password_saved']:
+                check_connection(startup_config)
+                LOG.warning('Escalation startup sender check: authentication succeeded; no email sent.')
+        except Exception as exc:
+            LOG.error('Escalation startup sender check: %s',email_error(exc))
         while True:
             try:run_daily(root)
             except Exception:LOG.exception('Escalation scheduler failed; no delivery assumed successful.')
