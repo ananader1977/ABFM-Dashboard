@@ -19,11 +19,34 @@ from visuals import INK, GOLD, PALETTE, categories, date_fields
 MISSING = '(Not specified)'
 TECHNICIAN = 'Technician · Assigned Resource'
 MANAGER = 'Contract Manager (Contract)'
+MANAGER_FIELDS = {MANAGER,'Contract Manager (Contract) (Contract)','Approved by (Operation)','Contract In Charge','Manager','Managers'}
 
 
 def labels(series):
-    from mail_reports import DISPLAY_NAMES
-    return series.astype('string[pyarrow]').fillna(MISSING).replace('', MISSING).replace(DISPLAY_NAMES)
+    from mail_reports import DISPLAY_NAMES, display_name
+    result=series.astype('string[pyarrow]').str.strip().fillna(MISSING).replace('', MISSING).replace(DISPLAY_NAMES)
+    if series.name in MANAGER_FIELDS:
+        result=result.replace({value:display_name(value) for value in result.unique()})
+    return result
+
+
+def reconcile_multiselect(state_key,choices,normalize_names=False):
+    from mail_reports import display_name
+    if state_key not in st.session_state:return
+    previous=st.session_state[state_key] or []
+    valid=set(choices)
+    chosen=list(dict.fromkeys(display_name(value) if normalize_names else value for value in previous))
+    chosen=[value for value in chosen if value in valid]
+    if chosen!=previous:st.session_state[state_key]=chosen
+
+
+def refresh_work_order_filters(state,version):
+    if state.get('_work_order_filter_version')==version:return
+    pages=['Reactive','PPM','Corrective','Pro-active']
+    prefixes=tuple(prefix+page+'_' for page in pages for prefix in ['quick_','chart_filters_','columns_','record_page_','export_columns_','export_page_'])+('filter_Reactive_','date_Reactive_','search_Reactive_')
+    for name in list(state):
+        if name.startswith(prefixes) or name in {'fields_Reactive','executive_scope'}:state.pop(name,None)
+    state['_work_order_filter_version']=version
 
 
 def apply_chart_filters(frame, selections, exclude=None):
@@ -97,7 +120,8 @@ def linked_charts(frame, table, page):
             dims.append(name)
     dims = dims[:6]
     state = 'chart_filters_' + page + '_' + table
-    active = {c: v for c, v in st.session_state.get(state, {}).items() if c in dims}
+    from mail_reports import display_name
+    active = {c: list(dict.fromkeys(display_name(value) if c in MANAGER_FIELDS else value for value in v)) for c, v in st.session_state.get(state, {}).items() if c in dims}
     st.caption('Click a bar to filter charts, totals and records. Shift-click selects several values; double-click clears that chart. Up to 12 categories per chart; use filters to find other values.')
     st.button('Clear chart selections', key=state + '_clear', on_click=clear_charts, args=(state,))
     if active:
@@ -127,7 +151,9 @@ def quick_filters(frame, page):
             continue
         with column:
             choices = sorted(labels(frame[field]).unique().tolist())
-            chosen = st.multiselect(field, choices, key='quick_' + page + '_' + field)
+            state_key='quick_' + page + '_' + field
+            reconcile_multiselect(state_key,choices,normalize_names=field in MANAGER_FIELDS)
+            chosen = st.multiselect(field, choices, key=state_key)
             if chosen:
                 frame = frame.loc[labels(frame[field]).isin(chosen)]
     return frame
