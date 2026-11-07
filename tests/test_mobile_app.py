@@ -17,7 +17,7 @@ class MobileApplication(unittest.TestCase):
   async def dashboard(request):return PlainTextResponse('Dashboard authentication remains required')
   client=TestClient(Starlette(routes=mobile_routes()+[Route('/',dashboard)]))
   page=client.get('/mobile/');self.assertEqual(page.status_code,200)
-  self.assertIn('Add to Home Screen',page.text);self.assertIn('role="status"',page.text)
+  self.assertIn('Add to Home Screen',page.text);self.assertIn('<h2>Windows</h2>',page.text);self.assertIn('role="status"',page.text)
   self.assertIn("script-src 'self'",page.headers['content-security-policy'])
   manifest=client.get('/mobile/manifest.webmanifest').json()
   self.assertEqual(manifest['start_url'],'/');self.assertEqual(manifest['scope'],'/')
