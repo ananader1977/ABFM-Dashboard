@@ -109,6 +109,8 @@ def admin_panel(user):
             st.success(f"Replaced work orders: {report['rows']:,} records. Work orders updated; restored MR, RFQ and subcontractor datasets retained.")
         except (ValueError, KeyError) as error:
             st.error(str(error))
+    from escalation import admin_panel as escalation_admin
+    escalation_admin(ROOT)
     with st.expander("Snapshot recovery"):
         st.caption("Previous snapshots are retained as a recoverable backup and are excluded from the active dashboard.")
         current_name = (ROOT / 'current.txt').read_text().strip() if (ROOT / 'current.txt').exists() else ''
