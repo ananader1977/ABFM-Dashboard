@@ -186,38 +186,58 @@ def unique_lookup(rows, field, value, required):
 
 
 def routes(tasks, rfqs, config, expired_contracts=None):
+    """One operations email per director; one procurement email for all staff."""
     groups={};issues=[]
+    operations=config.get('operations',[]);staff=config.get('procurement',[])
+    def issue(kind,record,owner,reason):
+        issues.append({'Type':kind,'Record':record,'Responsible':owner,'Issue':reason})
+    def add_person(group,name,address,record):
+        people=group.setdefault('_people',{})
+        person=people.setdefault(address,{'name':display_name(name),'email':address,'records':[]})
+        person['records'].append(record);group['records'].append(record)
     for _,row in tasks.iterrows():
         manager=text(row.get(MANAGER))
-        dest,error=unique_lookup(config.get('operations',[]),'name',manager,['email','director','coo'])
-        # Cross-sheet address conflicts require a correction, not a guessed identity.
-        other={r['operations_email'] for r in config.get('procurement',[]) if key(r.get('approver'))==key(manager) and r.get('operations_email')}
+        dest,error=unique_lookup(operations,'name',manager,['email','director','coo'])
+        other={r['operations_email'] for r in staff if key(r.get('approver'))==key(manager) and r.get('operations_email')}
         if dest and other and dest['email'] not in other:dest,error=None,'Operations and procurement sheets disagree on manager email'
-        if not dest:
-            issues.append({'Type':'Operations','Record':text(row.get('WO No.',row.get('Task Id'))),'Responsible':manager,'Issue':error});continue
-        cc=tuple(sorted({dest['director'],dest['coo']}))
-        group=groups.setdefault(('Operations',dest['email'],cc),[]);group.append(row.to_dict())
-    staff=config.get('procurement',[])
-    managers={r.get('procurement_manager') for r in staff if r.get('procurement_manager')}
+        if not dest or any(not email(dest[c]) for c in ['email','director','coo']):
+            issue('Operations',text(row.get('WO No.',row.get('Task Id'))),manager,error or 'Invalid recipient address');continue
+        director=email(dest['director'])
+        group=groups.setdefault(('Operations',director),{'kind':'Operations','director':director,'_to':set(),'_cc':{director},'records':[]})
+        group['_to'].add(email(dest['email']));group['_cc'].add(email(dest['coo']))
+        add_person(group,manager,email(dest['email']),row.to_dict())
+    # Include the department's verified roster, including staff with no matching task.
+    for group in groups.values():
+        for person in operations:
+            if email(person.get('director'))!=group['director']:continue
+            dest,error=unique_lookup(operations,'name',person.get('name'),['email','director','coo'])
+            if dest and all(email(dest[c]) for c in ['email','director','coo']):
+                group['_to'].add(email(dest['email']));group['_cc'].add(email(dest['coo']))
+    managers={email(r.get('procurement_manager')) for r in staff if email(r.get('procurement_manager'))}
+    procurement={'kind':'Procurement','_to':set(),'_cc':managers,'records':[]}
+    if len(managers)==1:
+        for person in staff:
+            if not text(person.get('assignee')):continue
+            dest,error=unique_lookup(staff,'assignee',person['assignee'],['email'])
+            if dest and email(dest['email']):procurement['_to'].add(email(dest['email']))
     for _,row in rfqs.iterrows():
-        assignee=text(row.get(ASSIGNEE));approver=text(row.get('Approved by (Operation)'))
-        dest,error=unique_lookup(staff,'assignee',assignee,['email'])
-        ops,ops_error=unique_lookup(staff,'approver',approver,['operations_email','director','coo'])
-        if not dest or not ops or len(managers)!=1:
-            issues.append({'Type':'Procurement','Record':text(row.get('Reference Number')),'Responsible':f'{assignee} / {approver}',
-                           'Issue':error or ops_error or 'Procurement manager is missing or ambiguous'});continue
-        cc=tuple(sorted({ops['operations_email'],ops['director'],ops['coo'],next(iter(managers))}))
-        group=groups.setdefault(('Procurement',dest['email'],cc),[]);group.append(row.to_dict())
-    result=[{'kind':kind,'to':to,'cc':list(cc),'records':rows} for (kind,to,cc),rows in groups.items()]
+        assignee=text(row.get(ASSIGNEE));dest,error=unique_lookup(staff,'assignee',assignee,['email'])
+        if not dest or not email(dest.get('email')) or len(managers)!=1:
+            issue('Procurement',text(row.get('Reference Number')),assignee,error or 'Missing or ambiguous procurement recipient/manager');continue
+        add_person(procurement,assignee,email(dest['email']),row.to_dict())
     if expired_contracts:
-        ovini=next((g for g in result if g['kind']=='Procurement' and any(key(row.get(ASSIGNEE))=='ovini' for row in g['records'])),None)
-        if ovini is None:
-            dest,error=unique_lookup(staff,'assignee','Ovini',['email','procurement_manager','operations_email','director','coo'])
-            if dest:
-                ovini={'kind':'Procurement','to':dest['email'],'cc':sorted({dest[c] for c in ['procurement_manager','operations_email','director','coo']}),'records':[]}
-                result.append(ovini)
-            else:issues.append({'Type':'Procurement','Record':'Expired subcontractor agreements','Responsible':'Ovini','Issue':error})
-        if ovini is not None:ovini['expired_contracts']=expired_contracts
+        dest,error=unique_lookup(staff,'assignee','Ovini',['email'])
+        if dest and email(dest.get('email')) and len(managers)==1:
+            procurement['expired_contracts']=expired_contracts
+        else:issue('Procurement','Expired subcontractor agreements','Ovini',error or 'Missing or ambiguous procurement recipient/manager')
+    if procurement['records'] or procurement.get('expired_contracts'):groups[('Procurement','all')]=procurement
+    result=[]
+    for _,group in sorted(groups.items()):
+        cc=group.pop('_cc');recipients=group.pop('_to')
+        # Keep an owning director in To once; do not repeat the address in CC.
+        group['to']=', '.join(sorted(recipients));group['cc']=sorted(cc-recipients)
+        group['individuals']=sorted(group.pop('_people',{}).values(),key=lambda p:(key(p['name']),p['email']))
+        result.append(group)
     return result,issues
 
 
@@ -283,7 +303,7 @@ def build_email(group,sender,source_date,test_to=None):
     from mail_reports import pdf_bytes
     sent_at=datetime.now(TZ).replace(microsecond=0);deadline=sent_at+timedelta(hours=24)
     msg=EmailMessage();msg['From']=sender;msg['To']=test_to or group['to'];msg['Date']=format_datetime(sent_at)
-    if not test_to:msg['Cc']=', '.join(group['cc'])
+    if not test_to and group['cc']:msg['Cc']=', '.join(group['cc'])
     record_label='open records' if group['kind']=='Operations' else 'open RFQs'
     contract_subject=f" · {len(group['expired_contracts'])} expired agreements" if group.get('expired_contracts') else ''
     msg['Subject']=('[TEST] ' if test_to else '')+f"ABFM {group['kind']} escalation · {len(group['records'])} {record_label}{contract_subject} · {sent_at:%d %b %Y}"
@@ -296,12 +316,24 @@ def build_email(group,sender,source_date,test_to=None):
     action='Within 24 hours of this email, confirm closure or provide the responsible owner, action plan and expected completion date. If blocked, reply by the deadline with the blocker and recovery plan.'
     due=f"Response due: {deadline:%d %b %Y, %H:%M} Dubai (UTC+4). Email date: {sent_at:%d %b %Y, %H:%M} Dubai (UTC+4)."
     note=f"Source snapshot: {source_date}. Imported snapshot; closure and new-work updates require a new import."
-    msg.set_content('\n\n'.join([intro,action,due,summary.to_string(index=False),extra,f"{len(full):,} records. Excel contains the complete source data; the PDF provides an action register.",note]))
-    msg.add_alternative('<div style="font-family:Calibri,Arial,sans-serif;color:#122843;background:#fffefa;padding:24px;border-top:4px solid #b3955b"><h2>AL BONIAN FM | '+html.escape(group['kind'])+' escalation</h2><p>'+html.escape(intro)+'</p><p>'+html.escape(action)+'</p><p><strong>'+html.escape(due)+'</strong></p><h3>Open task breakdown</h3>'+email_summary_html(summary)+('<p>'+html.escape(extra)+'</p>' if extra else '')+'<p>'+str(len(full))+' records. Please review the attached Excel data and PDF action register.</p><p style="font-size:12px">'+html.escape(note)+'</p></div>',subtype='html')
-    full=full.copy();full['Email sent (Dubai)']=sent_at.isoformat();full['Response due (Dubai)']=deadline.isoformat()
+    msg.set_content('\n\n'.join([intro,action,due,summary.to_string(index=False),extra,f"{len(full):,} records. Separate individual Excel files contain the complete source data; one combined PDF contains the summary and action register.",note]))
+    msg.add_alternative('<div style="font-family:Calibri,Arial,sans-serif;color:#122843;background:#fffefa;padding:24px;border-top:4px solid #b3955b"><h2>AL BONIAN FM | '+html.escape(group['kind'])+' escalation</h2><p>'+html.escape(intro)+'</p><p>'+html.escape(action)+'</p><p><strong>'+html.escape(due)+'</strong></p><h3>Open task breakdown</h3>'+email_summary_html(summary)+('<p>'+html.escape(extra)+'</p>' if extra else '')+'<p>'+str(len(full))+' records. Please review the separate individual Excel files and combined PDF summary and action register.</p><p style="font-size:12px">'+html.escape(note)+'</p></div>',subtype='html')
     stem=f"ABFM_{group['kind']}_Escalation_{sent_at:%Y%m%d}"
-    msg.add_attachment(excel_bytes(list(full.columns),full.itertuples(index=False,name=None)),maintype='application',subtype='vnd.openxmlformats-officedocument.spreadsheetml.sheet',filename=stem+'.xlsx')
-    msg.add_attachment(pdf_bytes(group['kind'],frame,sent_at,deadline,source_date),maintype='application',subtype='pdf',filename=stem+'.pdf')
+    individuals=group.get('individuals')
+    if individuals is None:
+        field=MANAGER if group['kind']=='Operations' else ASSIGNEE
+        individuals=[{'name':display_name(text(name)) or 'Not assigned','records':part.to_dict('records')} for name,part in full.groupby(field,dropna=False)] if field in full else [{'name':group['kind'],'records':group['records']}]
+    seen=set()
+    for person in individuals:
+        records=pd.DataFrame(person['records'])
+        if records.empty:continue
+        records['Email sent (Dubai)']=sent_at.isoformat();records['Response due (Dubai)']=deadline.isoformat()
+        name=re.sub(r'[^A-Za-z0-9_-]+','_',person['name']).strip('_') or 'Staff'
+        filename=f'{stem}_{name}.xlsx'
+        if filename in seen:filename=f'{stem}_{name}_{hashlib.sha256(person.get("email",str(len(seen))).encode()).hexdigest()[:8]}.xlsx'
+        seen.add(filename)
+        msg.add_attachment(excel_bytes(list(records.columns),records.itertuples(index=False,name=None)),maintype='application',subtype='vnd.openxmlformats-officedocument.spreadsheetml.sheet',filename=filename)
+    msg.add_attachment(pdf_bytes(group['kind'],frame,sent_at,deadline,source_date,summary=summary,expired_contracts=expired),maintype='application',subtype='pdf',filename=stem+'.pdf')
     if expired:
         contracts=pd.DataFrame(expired);contracts['Email sent (Dubai)']=sent_at.isoformat();contracts['Response due (Dubai)']=deadline.isoformat()
         msg.add_attachment(excel_bytes(list(contracts.columns),contracts.itertuples(index=False,name=None)),maintype='application',subtype='vnd.openxmlformats-officedocument.spreadsheetml.sheet',filename=f'ABFM_Ovini_Expired_Contracts_{sent_at:%Y%m%d}.xlsx')
@@ -405,8 +437,6 @@ def send_groups(groups,config,source_date,test=False):
     if not groups:raise ValueError('No routable records are available. Check the recipient preview and unresolved routing rows.')
     test_to=config.get('test_email','')
     if test and not email(test_to):raise ValueError('Set the test recipient email first.')
-    if test:
-        groups=[{'kind':kind,'to':test_to,'cc':[], 'records':[row for g in groups if g['kind']==kind for row in g['records']], 'expired_contracts':[row for g in groups if g['kind']==kind for row in g.get('expired_contracts',[])]} for kind in ['Operations','Procurement'] if any(g['kind']==kind for g in groups)]
     messages=[build_email(g,smtp['sender'],source_date.get(g['kind'],'Unknown') if isinstance(source_date,dict) else source_date,test_to if test else None) for g in groups]
     accepted=0
     try:
@@ -439,7 +469,7 @@ def run_daily(root,now=None):
     ledger.execute('CREATE TABLE IF NOT EXISTS deliveries (id TEXT PRIMARY KEY,status TEXT,created TEXT)')
     try:
         for group in groups:
-            delivery_id=hashlib.sha256(json.dumps([str(now.date()),group['kind'],group['to'],group['cc']]).encode()).hexdigest()
+            delivery_id=hashlib.sha256(json.dumps([str(now.date()),'department-batch-v1',group['kind'],group.get('director','all')]).encode()).hexdigest()
             try:
                 ledger.execute('INSERT INTO deliveries VALUES(?,?,?)',(delivery_id,'sending',now.isoformat()));ledger.commit()
             except sqlite3.IntegrityError:continue
@@ -561,8 +591,8 @@ def admin_panel(root):
     directory,manifest=snapshot(root)
     tasks=priority_tasks(directory,manifest);rfqs=open_rfqs(directory,manifest)
     groups,issues=routes(tasks,rfqs,config,expired_agreements(directory,manifest))
-    st.caption('Daily schedule: 08:00 Asia/Dubai. Separate operations and procurement escalation messages are grouped by To and CC so unrelated contract records are not shared. Every live message includes its Director and COO.')
-    st.dataframe(pd.DataFrame([{'Email type':g['kind'],'To':g['to'],'CC':', '.join(g['cc']),'Records':len(g['records']),'Expired agreements':len(g.get('expired_contracts',[]))} for g in groups]),hide_index=True,width='stretch')
+    st.caption('Daily schedule: 08:00 Asia/Dubai. One operations email per director, CC that director and COO; Rafik remains separate. One procurement email to all verified procurement staff, CC the procurement manager. Each email has individual Excel files and one combined PDF. Test sends mirror this grouping and go only to the test recipient.')
+    st.dataframe(pd.DataFrame([{'Email type':g['kind'],'To':g['to'],'CC':', '.join(g['cc']),'Individual Excel files':len(g.get('individuals',[])),'Records':len(g['records']),'Expired agreements':len(g.get('expired_contracts',[]))} for g in groups]),hide_index=True,width='stretch')
     if issues:
         st.warning(f'{len(issues):,} records have missing or conflicting routing and will not be emailed until corrected.')
         st.dataframe(pd.DataFrame(issues),hide_index=True,width='stretch')
