@@ -1,6 +1,7 @@
 """Public installation shell; all dashboard data keeps its existing login protection."""
 import base64
 import json
+import os
 from functools import lru_cache
 from starlette.responses import Response
 from starlette.routing import Route
@@ -79,6 +80,10 @@ def enable_mobile_app():
     def create_app(runtime):
         app=original(runtime)
         app.router.routes[0:0]=mobile_routes()
+        if os.environ.get('ABFM_BROWSER_SESSIONS')=='1':
+            from browser_sessions import BrowserSessionGate,auth_routes
+            app.router.routes[0:0]=auth_routes()
+            app.add_middleware(BrowserSessionGate)
         return app
     create_app._abfm_mobile=True
     starlette_server.create_starlette_app=create_app
