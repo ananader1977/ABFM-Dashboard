@@ -261,12 +261,22 @@ def smtp_connection(config):
     client=None
     stage='server connection / greeting'
     try:
-        client=smtplib.SMTP_SSL(settings['host'],port,timeout=30,context=ssl.create_default_context()) if port==465 else smtplib.SMTP(settings['host'],port,timeout=30)
+        client=smtplib.SMTP_SSL(settings['host'],port,timeout=30,context=ssl.create_default_context(),local_hostname='abfm-dashboard.onrender.com') if port==465 else smtplib.SMTP(settings['host'],port,timeout=30,local_hostname='abfm-dashboard.onrender.com')
         if port!=465:
             stage='encrypted TLS setup'
             client.starttls(context=ssl.create_default_context())
+        stage='post-TLS SMTP greeting'
+        client.ehlo()
         stage='Gmail authentication'
-        client.login(settings['username'],settings['password'])
+        mechanisms=client.esmtp_features.get('auth','').upper().split()
+        if 'LOGIN' in mechanisms:
+            responses=iter([settings['username'],settings['password']])
+            def login_response(challenge=None):
+                try:return next(responses)
+                except StopIteration:raise smtplib.SMTPException('Unexpected extra authentication challenge') from None
+            client.auth('LOGIN',login_response,initial_response_ok=False)
+        else:
+            client.login(settings['username'],settings['password'],initial_response_ok=False)
     except Exception as exc:
         if client:client.close()
         LOG.error('Escalation SMTP stage failed: %s (%s)',stage,type(exc).__name__)
