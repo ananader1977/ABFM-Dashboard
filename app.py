@@ -14,7 +14,7 @@ import streamlit as st
 from analytics import PAGE_TABLES, TASK_TYPES, aggregate, dates, field_reference, resolve, summarize, task_frame, source_filters
 from brand import LOGO
 from security import authenticate, connect, current_user, save_user, rename_user
-from interactive import linked_charts, quick_filters, records_panel
+from interactive import linked_charts, quick_filters, records_panel, labels, MANAGER_FIELDS, reconcile_multiselect, refresh_work_order_filters
 from work_orders import install_excel_replacement, excel_sheet_names, preview_excel
 from measures import measure
 from data_access import load_table, load_rows, display_columns, source_visuals, SOURCE_VISUAL_TYPES
@@ -70,6 +70,12 @@ def snapshot():
     return directory, json.loads((directory / "manifest.json").read_text())
 
 
+def work_order_import_notice(source):
+    imported=pd.to_datetime(source.get('imported_at'),utc=True,errors='coerce')
+    stamp=imported.tz_convert('Asia/Dubai').strftime('%d %b %Y, %I:%M %p')+' Dubai' if pd.notna(imported) else 'Import time unavailable'
+    return f"Active work-order import: {source.get('name','Excel workbook')} · {stamp} · {int(source.get('rows',0)):,} records. Selecting a file does not replace data; click Apply replacement work orders to activate it."
+
+
 def admin_panel(user):
     st.header("Administration")
     st.caption("Operations users can view dashboards only. Account and import controls require administrator access.")
@@ -97,6 +103,11 @@ def admin_panel(user):
             except (ValueError, PermissionError) as e:
                 st.error(str(e))
     st.subheader("Replace work-order data")
+    _, active_manifest=snapshot()
+    active_source=(active_manifest or {}).get('work_order_source',{})
+    active_import_notice=st.empty()
+    if active_source:
+        active_import_notice.info(work_order_import_notice(active_source))
     st.caption("Upload the complete updated Excel (.xlsx) export in the Anas - All Work Orders format. This replaces Reactive, PPM, Corrective and Pro-active records. MR Tracker, RFQ and subcontractor agreements stay as they are. Previous snapshots remain available for recovery.")
     replacement = st.file_uploader("Updated work-order Excel workbook", type=["xlsx"], key="replacement_work_order_excel_upload")
     if replacement:
@@ -111,6 +122,7 @@ def admin_panel(user):
                 with st.spinner("Reading Excel, validating records and replacing work orders…"):
                     report = install_excel_replacement(replacement, ROOT, sheet)
                 st.cache_data.clear()
+                active_import_notice.info(work_order_import_notice(report))
                 st.success(f"Replaced work orders: {report['rows']:,} records. MR Tracker, RFQ and subcontractor datasets retained. Reopen Executive Summary to see the updated counts.")
                 if report.get('blank_priority_rows'):
                     st.info(f"{report['blank_priority_rows']:,} records have blank priority and were retained. Records without priority are excluded from P1/P2 escalation.")
@@ -152,10 +164,14 @@ def filters(frame, table, source_columns=None):
                         values = dates(result[col])
                         result = result.loc[values.ge(pd.Timestamp(span[0])) & values.lt(pd.Timestamp(span[1]) + pd.Timedelta(days=1))]
             elif series.nunique() <= 500:
-                choices = sorted(series.dropna().astype('string[pyarrow]').unique())
-                chosen = st.multiselect(col, choices, key=f"filter_{table}_{col}")
+                manager_field=col in MANAGER_FIELDS
+                choices = sorted(labels(series).unique()) if manager_field else sorted(series.dropna().astype('string[pyarrow]').unique())
+                state_key=f'filter_{table}_{col}'
+                reconcile_multiselect(state_key,choices,normalize_names=manager_field)
+                chosen = st.multiselect(col, choices, key=state_key)
                 if chosen:
-                    result = result.loc[result[col].astype('string[pyarrow]').isin(chosen)]
+                    values=labels(result[col]) if manager_field else result[col].astype('string[pyarrow]')
+                    result = result.loc[values.isin(chosen)]
             else:
                 text = st.text_input(f"{col} contains", key=f"search_{table}_{col}")
                 if text:
@@ -288,6 +304,8 @@ def run():
         st.caption("Android · iPhone · iPad · Windows")
         st.title("FM Dashboard")
         directory, manifest = snapshot()
+        if manifest and manifest.get('work_order_source'):
+            refresh_work_order_filters(st.session_state,directory.name+':'+str(manifest['work_order_source'].get('imported_at','')))
         available_pages = [p["name"] for p in manifest["pages"] if p["name"] not in REMOVED_PAGES and p['name'] != EXECUTIVE_PAGE] if manifest else []
         names = [EXECUTIVE_PAGE] + available_pages if manifest else []
         options = names + (["Administration"] if user["role"] == "admin" else [])
