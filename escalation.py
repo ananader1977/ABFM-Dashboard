@@ -144,18 +144,21 @@ def priority_tasks(directory,manifest,now=None):
 
 
 def manager_counts(directory,manifest):
-    counts={};totals={}
+    counts={};totals={};aliases={}
     cols=['Work Order Type','Status',MANAGER]
     for frame in scan(directory,manifest,'Reactive',cols):
         if not set(cols)<=set(frame):continue
         frame=frame.loc[frame['Work Order Type'].isin(['Reactive','Corrective','Pro-active'])].copy()
-        frame[MANAGER]=frame[MANAGER].fillna('(Not assigned)').replace('','(Not assigned)')
+        frame['_manager_variant']=frame[MANAGER].fillna('(Not assigned)').replace('','(Not assigned)')
+        frame[MANAGER]=frame['_manager_variant'].map(lambda name: 'Rafik Jabbour' if key(name).lstrip('#').strip()=='rafik jabbour' else name)
         for (name,kind),group in frame.groupby([MANAGER,'Work Order Type'],dropna=False):
+            aliases.setdefault((name,kind),set()).update(group['_manager_variant'].unique())
             totals[name]=totals.get(name,0)+len(group)
             counts[(name,kind)]=counts.get((name,kind),0)+int(normalized(group.Status).isin(OPEN).sum())
-    return [{'name':name,'Reactive':counts.get((name,'Reactive'),0),'Corrective':counts.get((name,'Corrective'),0),
+    rows=[{'name':name,'aliases':{k:sorted(aliases.get((name,k),set())) for k in ['Reactive','Corrective','Pro-active']},'Reactive':counts.get((name,'Reactive'),0),'Corrective':counts.get((name,'Corrective'),0),
              'Pro-active':counts.get((name,'Pro-active'),0),'total':totals[name],
-             'open':sum(counts.get((name,k),0) for k in ['Reactive','Corrective','Pro-active'])} for name in sorted(totals)]
+             'open':sum(counts.get((name,k),0) for k in ['Reactive','Corrective','Pro-active'])} for name in totals]
+    return sorted(rows,key=lambda row:(row['name']=='(Not assigned)',-row['open'],key(row['name'])))
 
 
 def open_rfqs(directory,manifest):
@@ -300,9 +303,9 @@ def executive_panels(directory,manifest):
 def review_cards(directory,manifest):
     import streamlit as st
     rows=[row for row in manager_counts(directory,manifest) if row['open'] > 0]
-    def open_manager(name,kind):
+    def open_manager(name,kind,variants):
         from executive import navigate
-        st.session_state['quick_'+kind+'_Contract Manager (Contract)'] = ['(Not specified)' if name=='(Not assigned)' else name]
+        st.session_state['quick_'+kind+'_Contract Manager (Contract)'] = ['(Not specified)' if variant=='(Not assigned)' else variant for variant in variants]
         navigate(kind,'wo_open','Reactive')
     for offset in range(0,len(rows),4):
         for col,row in zip(st.columns(4),rows[offset:offset+4]):
@@ -311,7 +314,7 @@ def review_cards(directory,manifest):
                 st.metric('Open Reactive / Corrective / Pro-active',f"{row['open']:,}")
                 st.caption(' · '.join(f'{k}: {row[k]:,}' for k in ['Reactive','Corrective','Pro-active']))
                 for kind in ['Reactive','Corrective','Pro-active']:
-                    if row[kind]:st.button(f'View {kind} ({row[kind]:,})',key='manager_'+row['name']+'_'+kind,on_click=open_manager,args=(row['name'],kind))
+                    if row[kind]:st.button(f'View {kind} ({row[kind]:,})',key='manager_'+row['name']+'_'+kind,on_click=open_manager,args=(row['name'],kind,row['aliases'][kind]))
                 pct=100*row['open']/row['total'] if row['total'] else 0
                 color='#b42318' if pct>5 else '#16703d' if pct<5 else '#65758a'
                 st.markdown(f'<span style="color:{color};font-weight:700">{pct:.2f}%</span> of {row["total"]:,} work orders',unsafe_allow_html=True)
