@@ -190,4 +190,5 @@ def render(directory,manifest,pages):
             data=lambda: excel_bytes(list(summary.columns), summary.itertuples(index=False, name=None)),
             file_name='ABFM_Executive_Summary.xlsx',
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', on_click='ignore')
-    st.caption('Work orders use Anas - All Work Orders.xlsx. MR Tracker, RFQ and Subcontractors Agreement use their restored snapshot; source dates are shown per workspace. Cancellations remain separate.' if manifest.get('requested_restored_pages') else 'Only Anas - All Work Orders.xlsx is active. Counts use the confirmed status rules; cancellations remain separate.' if manifest.get('work_orders_only') else 'Calculated from imported snapshots. This is not a live Power BI connection.')
+    source_name=manifest.get('work_order_source',{}).get('name','Anas - All Work Orders.xlsx')
+    st.caption(f'Work orders use {source_name}. MR Tracker, RFQ and Subcontractors Agreement use their retained snapshot; source dates are shown per workspace. Cancellations remain separate.' if manifest.get('requested_restored_pages') else f'Only {source_name} is active. Counts use the confirmed status rules; cancellations remain separate.' if manifest.get('work_orders_only') else 'Calculated from imported snapshots. This is not a live Power BI connection.')
