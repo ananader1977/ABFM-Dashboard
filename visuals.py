@@ -96,6 +96,7 @@ def status_style(label, percentage=None):
             return '#16703d', '700', 'green'
         if percentage >= 90:
             return '#6b9f5c', '700', 'lightgreen'
+        return '#b42318', '700', 'red'
     return INK, '500', 'normal'
 
 
