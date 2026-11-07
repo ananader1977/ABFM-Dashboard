@@ -122,6 +122,8 @@ def main():
     # persistent even with no browser session, instead of a second 200 MB process.
     from escalation import start_scheduler
     start_scheduler(root)
+    from mobile_app import enable_mobile_app
+    enable_mobile_app()
     import sys
     from streamlit.web import cli as streamlit_cli
     sys.argv = ['streamlit', 'run', 'app.py', '--server.address=0.0.0.0', f'--server.port={port}', '--browser.gatherUsageStats=false']
