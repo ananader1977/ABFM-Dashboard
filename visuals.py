@@ -1,5 +1,6 @@
 """Small aggregate-only figures and the Al Bonian executive visual theme."""
 import html
+import re
 import pandas as pd
 import streamlit as st
 from analytics import dates, today, normalized, resolve, numbers, OPEN, COMPLETED
@@ -51,7 +52,23 @@ h1,h2{font-family:Georgia,'Times New Roman',serif!important;font-weight:500!impo
 .queue-label{font-size:.8rem;color:#65758a;letter-spacing:.025em;margin-bottom:10px}
 [data-testid="stCaptionContainer"]{color:#6b7888}
 @media(max-width:760px){.executive-hero{padding:23px}.executive-hero h1{font-size:2rem!important}.block-container{padding:1.4rem 1rem}.brand{padding:18px}[data-testid="stMetricValue"]{font-size:1.6rem!important}}
+[class*="st-key-metric_status_red_"] [data-testid="stMetricValue"], [class*="st-key-metric_status_red_"] [data-testid="stMetricLabel"] * {color:#b42318!important;font-weight:700!important}
+[class*="st-key-metric_status_green_"] [data-testid="stMetricValue"], [class*="st-key-metric_status_green_"] [data-testid="stMetricLabel"] * {color:#16703d!important;font-weight:700!important}
 </style>'''
+
+
+def status_style(label, percentage=None):
+    if re.search(r'\bopen\b', label, flags=re.I):
+        return '#b42318', '700', 'red'
+    if re.search(r'complet(?:ed|ion)', label, flags=re.I) and percentage is not None and percentage > 90:
+        return '#16703d', '700', 'green'
+    return INK, '500', 'normal'
+
+
+def styled_metric(container, label, value, percentage=None, key='value'):
+    _, _, tone = status_style(label, percentage)
+    with container.container(key='metric_status_' + tone + '_' + re.sub(r'[^a-zA-Z0-9_]', '_', str(key))):
+        st.metric(label, value)
 
 
 def page_header(name, imported_at):
