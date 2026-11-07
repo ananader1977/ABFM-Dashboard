@@ -299,13 +299,13 @@ def executive_panels(directory,manifest):
 
 def review_cards(directory,manifest):
     import streamlit as st
-    rows=manager_counts(directory,manifest)
+    rows=[row for row in manager_counts(directory,manifest) if row['open'] > 0]
     def open_manager(name,kind):
         from executive import navigate
         st.session_state['quick_'+kind+'_Contract Manager (Contract)'] = ['(Not specified)' if name=='(Not assigned)' else name]
         navigate(kind,'wo_open','Reactive')
-    for offset in range(0,len(rows),3):
-        for col,row in zip(st.columns(3),rows[offset:offset+3]):
+    for offset in range(0,len(rows),4):
+        for col,row in zip(st.columns(4),rows[offset:offset+4]):
             with col,st.container(border=True):
                 st.markdown('**'+row['name']+'**')
                 st.metric('Open Reactive / Corrective / Pro-active',f"{row['open']:,}")
@@ -319,8 +319,8 @@ def review_cards(directory,manifest):
     st.markdown('**Open RFQs by procurement staff**')
     if len(rfqs):
         counts=rfqs[ASSIGNEE].fillna('(Not assigned)').value_counts()
-        for offset in range(0,len(counts),3):
-            for col,(name,count) in zip(st.columns(3),list(counts.items())[offset:offset+3]):
+        for offset in range(0,len(counts),4):
+            for col,(name,count) in zip(st.columns(4),list(counts.items())[offset:offset+4]):
                 with col,st.container(border=True):
                     st.metric(str(name),f'{count:,}')
                     from executive import navigate
