@@ -118,7 +118,14 @@ def main():
     if prepare_snapshot(root):
         print("Prepared bounded data blocks for dashboard reads.", flush=True)
     print("Starting Al Bonian FM dashboard.", flush=True)
-    os.execvp("python", ["python", "-m", "streamlit", "run", "app.py", "--server.address=0.0.0.0", f"--server.port={port}", "--browser.gatherUsageStats=false"])
+    # Run the scheduler in the same process as Streamlit: one data/runtime heap,
+    # persistent even with no browser session, instead of a second 200 MB process.
+    from escalation import start_scheduler
+    start_scheduler(root)
+    import sys
+    from streamlit.web import cli as streamlit_cli
+    sys.argv = ['streamlit', 'run', 'app.py', '--server.address=0.0.0.0', f'--server.port={port}', '--browser.gatherUsageStats=false']
+    streamlit_cli.main()
 
 
 if __name__ == "__main__":
