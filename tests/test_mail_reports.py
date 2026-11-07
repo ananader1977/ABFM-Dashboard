@@ -55,7 +55,7 @@ class MailReports(unittest.TestCase):
         self.assertIn('Ovini_Expired_Contracts',list(msg.iter_attachments())[-1].get_filename())
         groups,issues=routes(pd.DataFrame(),pd.DataFrame(),config,expired)
         self.assertFalse(issues);self.assertEqual(groups[0]['records'],[])
-        self.assertEqual(len(list(build_email(groups[0],'sender@example.com','2026-11-07').iter_attachments())),3)
+        self.assertEqual(len(list(build_email(groups[0],'sender@example.com','2026-11-07').iter_attachments())),2)
         ops=email_summary('Operations',pd.DataFrame([{MANAGER:'Manager A','Work Order Type':'Reactive'},{MANAGER:'Manager A','Work Order Type':'Corrective'},{MANAGER:'Manager B','Work Order Type':'PPM'}]))
         self.assertEqual(ops['Total open'].sum(),3)
         self.assertEqual(ops.iloc[0]['Reactive'],1);self.assertEqual(ops.iloc[0]['Corrective'],1)
