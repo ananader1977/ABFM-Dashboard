@@ -58,9 +58,9 @@ h1,h2{font-family:Georgia,'Times New Roman',serif!important;font-weight:500!impo
 
 
 def status_style(label, percentage=None):
-    if re.search(r'\bopen\b', label, flags=re.I):
+    if re.search(r'\bopen\b', label, flags=re.I) and percentage is not None and percentage > 5:
         return '#b42318', '700', 'red'
-    if re.search(r'complet(?:ed|ion)', label, flags=re.I) and percentage is not None and percentage > 90:
+    if re.search(r'complet(?:ed|ion)', label, flags=re.I) and percentage is not None and percentage >= 95:
         return '#16703d', '700', 'green'
     return INK, '500', 'normal'
 
