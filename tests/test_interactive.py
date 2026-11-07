@@ -65,3 +65,29 @@ class InteractionTests(unittest.TestCase):
             dup.to_parquet(root/'bad.parquet',index=False)
             with self.assertRaises(ValueError):install_replacement(root/'bad.parquet',root)
             self.assertEqual(before,(root/'current.txt').read_text())
+
+    def test_manager_alias_filters_merge_variants_without_losing_rows(self):
+        from interactive import labels,apply_chart_filters,MANAGER
+        frame=pd.DataFrame({MANAGER:['# Rafik Jabbour','Rafik Jabbour','#Rafik Jabour','# Sanjay Sonu Shirodkar','Sanjay Shirodkar',' #Sanjay Shirodkar ',None]})
+        choices=set(labels(frame[MANAGER]))
+        self.assertEqual(choices,{'Rafik Jabbour','Sanjay Shirodkar','(Not specified)'})
+        self.assertEqual(len(apply_chart_filters(frame,{MANAGER:['Rafik Jabbour']})),3)
+        self.assertEqual(len(apply_chart_filters(frame,{MANAGER:['Sanjay Shirodkar']})),3)
+        self.assertEqual(len(frame),7)
+
+    def test_new_import_clears_only_work_order_filters_once(self):
+        from interactive import refresh_work_order_filters
+        state={'_work_order_filter_version':'old','quick_Reactive_Contract Manager (Contract)':['Old name'],
+            'chart_filters_Corrective_Reactive':{'Status':['ACTIVE']},'filter_Reactive_Priority':['P1'],
+            'fields_Reactive':['Priority'],'executive_scope':{'page':'Reactive'},'filter_RFQ_Status':['In progress'],
+            'identity':{'username':'test'},'workspace_page':'Reactive'}
+        refresh_work_order_filters(state,'new')
+        self.assertNotIn('quick_Reactive_Contract Manager (Contract)',state)
+        self.assertNotIn('chart_filters_Corrective_Reactive',state)
+        self.assertNotIn('executive_scope',state)
+        self.assertEqual(state['filter_RFQ_Status'],['In progress'])
+        self.assertEqual(state['identity'],{'username':'test'})
+        self.assertEqual(state['workspace_page'],'Reactive')
+        state['quick_Reactive_Contract Manager (Contract)']=['New name']
+        refresh_work_order_filters(state,'new')
+        self.assertEqual(state['quick_Reactive_Contract Manager (Contract)'],['New name'])
