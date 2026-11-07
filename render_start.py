@@ -106,6 +106,9 @@ def main():
         server.serve_forever()
         server.server_close()
         gc.collect()
+    from security import configure_connection_secret
+    configure_connection_secret(root)
+    os.environ['ABFM_BROWSER_SESSIONS']='1'
     from security import apply_approved_admin_reset
     if apply_approved_admin_reset(root, os.environ.pop('ABFM_APPROVED_ADMIN_RESET', None)):
         print('Approved admin credential reset applied.', flush=True)
