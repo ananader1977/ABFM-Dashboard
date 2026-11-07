@@ -228,6 +228,9 @@ def send_groups(groups,config,source_date,test=False):
     if not groups:return 0
     test_to=config.get('test_email','')
     if test and not email(test_to):raise ValueError('Set the test recipient email first.')
+    if test:
+        # Two test messages: one combined example for each escalation stream.
+        groups=[{'kind':kind,'to':test_to,'cc':[], 'records':[row for g in groups if g['kind']==kind for row in g['records']]} for kind in ['Operations','Procurement'] if any(g['kind']==kind for g in groups)]
     messages=[build_email(g,smtp['sender'],source_date,test_to if test else None) for g in groups]
     # Always encrypt transport and require authenticated SMTP.
     port=int(smtp['port'] or 587)
