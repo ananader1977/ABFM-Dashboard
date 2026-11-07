@@ -13,7 +13,7 @@ import streamlit as st
 
 from analytics import PAGE_TABLES, TASK_TYPES, aggregate, dates, field_reference, resolve, summarize, task_frame, source_filters
 from brand import LOGO
-from security import authenticate, connect, current_user, save_user, rename_user
+from security import authenticate, connect, current_user, save_user, rename_user, browser_session_user, revoke_browser_session, SESSION_COOKIE
 from interactive import linked_charts, quick_filters, records_panel, labels, MANAGER_FIELDS, reconcile_multiselect, refresh_work_order_filters
 from work_orders import install_excel_replacement, excel_sheet_names, preview_excel
 from measures import measure
@@ -33,6 +33,12 @@ def brand():
 
 
 def login():
+    if os.environ.get('ABFM_BROWSER_SESSIONS')=='1':
+        brand()
+        st.title('Sign in to continue')
+        st.link_button('Sign in','/auth/login',use_container_width=True)
+        st.caption('Your session has ended. Sign in to open the dashboard.')
+        return
     _, center, _ = st.columns([1, 1.2, 1])
     with center:
         brand()
@@ -292,7 +298,8 @@ def run():
     # Plotly figures contain reference cycles. Reclaim prior views before reading
     # the next dataset so repeated chart changes do not retain their buffers.
     gc.collect()
-    user = current_user(ROOT, st.session_state.get("identity"))
+    browser_token=st.context.cookies.get(SESSION_COOKIE) if os.environ.get('ABFM_BROWSER_SESSIONS')=='1' else None
+    user = browser_session_user(ROOT,browser_token) if os.environ.get('ABFM_BROWSER_SESSIONS')=='1' else current_user(ROOT, st.session_state.get("identity"))
     if not user:
         st.session_state.pop("identity", None)
         login()
@@ -311,6 +318,7 @@ def run():
         options = names + (["Administration"] if user["role"] == "admin" else [])
         page_name = st.radio("Workspace", options, format_func=lambda name: PAGE_LABELS.get(name, name), key='workspace_page') if options else None
         if st.button("Sign out", use_container_width=True):
+            revoke_browser_session(ROOT,browser_token)
             st.session_state.clear()
             st.rerun()
         st.caption("Calculated insights • No external AI")
@@ -322,6 +330,7 @@ def run():
         install, sign_out = st.columns([2,1])
         install.link_button('Install app', '/mobile/', use_container_width=True)
         if sign_out.button('Sign out', key='mobile_sign_out', use_container_width=True):
+            revoke_browser_session(ROOT,browser_token)
             st.session_state.clear()
             st.rerun()
     if page_name == "Administration":
