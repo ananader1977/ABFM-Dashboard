@@ -17,9 +17,10 @@ class EscalationTests(unittest.TestCase):
  def test_scoped_routes_always_include_director_and_coo(self):
   ops=pd.DataFrame([{MANAGER:'Manager','WO No.':'1'}]);rfq=pd.DataFrame([{ASSIGNEE:'Buyer','Approved by (Operation)':'Manager','Reference Number':'R1'}])
   groups,issues=routes(ops,rfq,self.config());self.assertFalse(issues);self.assertEqual(len(groups),2)
-  for g in groups:
-   self.assertIn('director@example.com',g['cc']);self.assertIn('coo@example.com',g['cc'])
-  self.assertIn('manager@example.com',groups[1]['cc'])
+  operations=next(g for g in groups if g['kind']=='Operations');procurement=next(g for g in groups if g['kind']=='Procurement')
+  self.assertEqual(operations['cc'],['coo@example.com','director@example.com'])
+  self.assertEqual(procurement['cc'],['procmanager@example.com'])
+  self.assertEqual(procurement['to'],'buyer@example.com')
  def test_unmapped_or_conflicting_routes_are_blocked(self):
   c=self.config();c['procurement'][0]['operations_email']='different@example.com'
   groups,issues=routes(pd.DataFrame([{MANAGER:'Manager'}]),pd.DataFrame(),c)
@@ -68,3 +69,50 @@ class EscalationTests(unittest.TestCase):
    client.send_message.side_effect=[{},TimeoutError('network')]
    with self.assertRaises(DeliveryFailure) as error:send_groups(groups,config,'snapshot')
    self.assertEqual(error.exception.accepted,1);self.assertIn('do not resend',str(error.exception))
+
+ def test_four_department_messages_preserve_people_files_and_record_totals(self):
+  from io import BytesIO
+  from zipfile import ZipFile
+  from xml.etree import ElementTree as ET
+  from unittest.mock import MagicMock
+  config={'operations':[
+    {'name':'Alice','email':'alice@example.com','director':'d1@example.com','coo':'coo@example.com'},
+    {'name':'Bob','email':'bob@example.com','director':'d1@example.com','coo':'coo@example.com'},
+    {'name':'Carol','email':'carol@example.com','director':'d2@example.com','coo':'coo@example.com'},
+    {'name':'Rafik','email':'rafik@example.com','director':'rafik@example.com','coo':'coo@example.com'}],
+    'procurement':[{'assignee':n,'email':n.lower()+'@example.com','procurement_manager':'pm@example.com'} for n in ['Buyer','Ovini']]}
+  tasks=pd.DataFrame([{MANAGER:n,'WO No.':str(100+i),'Work Order Type':'Reactive','Priority':'P1','System Status':'In Progress','Created On':'2026-10-01'} for i,n in enumerate(['Alice','Alice','Bob','Carol','Rafik'])])
+  rfqs=pd.DataFrame([{ASSIGNEE:n,'Reference Number':'R'+str(i),'Status':'In progress','Approved by (Operation)':'Unmapped approver'} for i,n in enumerate(['Buyer','Ovini','Buyer'])])
+  groups,issues=routes(tasks,rfqs,config,[{'Vendor Name':'Vendor A','End Date ':'2026-01-01'}])
+  self.assertFalse(issues);self.assertEqual(len(groups),4)
+  self.assertEqual(sum(len(g['records']) for g in groups),8)
+  procurement=next(g for g in groups if g['kind']=='Procurement')
+  self.assertEqual(set(procurement['to'].split(', ')),{'buyer@example.com','ovini@example.com'})
+  self.assertEqual(procurement['cc'],['pm@example.com'])
+  d1=next(g for g in groups if g.get('director')=='d1@example.com')
+  self.assertEqual(set(d1['to'].split(', ')),{'alice@example.com','bob@example.com'})
+  self.assertEqual(len(d1['individuals']),2)
+  self.assertEqual(len(d1['records']),3)
+  rafik=next(g for g in groups if g.get('director')=='rafik@example.com')
+  self.assertEqual(rafik['to'],'rafik@example.com');self.assertEqual(rafik['cc'],['coo@example.com'])
+  for group in groups:
+   msg=build_email(group,'sender@example.com','2026-11-07')
+   attachments=list(msg.iter_attachments());pdfs=[a for a in attachments if a.get_content_type()=='application/pdf']
+   self.assertEqual(len(pdfs),1)
+   self.assertIn('Open task breakdown',msg.get_body(preferencelist=('html',)).get_content())
+   extracted=0;files=0
+   for attachment in attachments:
+    filename=attachment.get_filename()
+    if not filename.endswith('.xlsx') or 'Expired_Contracts' in filename:continue
+    files+=1
+    with ZipFile(BytesIO(attachment.get_payload(decode=True))) as archive:
+     root=ET.fromstring(archive.read('xl/worksheets/sheet1.xml'))
+     extracted+=len(root.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}row'))-1
+   self.assertEqual(extracted,len(group['records']))
+   self.assertEqual(files,len(group['individuals']))
+  connection=MagicMock();connection.__enter__.return_value.send_message.return_value={}
+  with patch('escalation.validate_sender',return_value={'sender':'sender@example.com'}),patch('escalation.smtp_connection',return_value=connection):
+   self.assertEqual(send_groups(groups,{'test_email':'test@example.com'},'snapshot',test=True),4)
+  sent=connection.__enter__.return_value.send_message.call_args_list
+  for call in sent:
+   self.assertEqual(call.args[0]['To'],'test@example.com');self.assertIsNone(call.args[0]['Cc'])
