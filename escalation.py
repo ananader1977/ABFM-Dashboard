@@ -251,6 +251,33 @@ def email_summary(kind,frame):
     return summary
 
 
+def email_summary_html(summary):
+    """Email-safe table with identical header and cell alignment in each column."""
+    numeric=[pd.api.types.is_numeric_dtype(summary[c]) for c in summary.columns]
+    text_count=sum(not value for value in numeric)
+    number_count=sum(numeric)
+    text_width=35 if text_count==1 else 40
+    number_width=(100-text_width*text_count)/number_count if number_count else 0
+    table=['<table width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;table-layout:fixed;font-family:Calibri,Arial,sans-serif;font-size:14px;line-height:20px;mso-table-lspace:0pt;mso-table-rspace:0pt;"><thead><tr>']
+    for column,is_number in zip(summary.columns,numeric):
+        align='right' if is_number else 'left'
+        width=number_width if is_number else text_width
+        table.append(f'<th scope="col" align="{align}" valign="middle" width="{width:g}%" bgcolor="#122843" style="width:{width:g}%;text-align:{align};vertical-align:middle;padding:10px 8px;border:1px solid #ddd5c5;border-bottom:2px solid #b3955b;background-color:#122843;color:#fffefa;font-weight:bold;overflow-wrap:break-word;">{html.escape(str(column))}</th>')
+    table.append('</tr></thead><tbody>')
+    for index,row in enumerate(summary.itertuples(index=False,name=None)):
+        background='#fffefa' if index%2==0 else '#f0ece3'
+        table.append('<tr>')
+        for value,is_number in zip(row,numeric):
+            align='right' if is_number else 'left'
+            label=f'{int(value):,}' if is_number and pd.notna(value) else ('' if pd.isna(value) else str(value))
+            table.append(f'<td align="{align}" valign="middle" bgcolor="{background}" style="text-align:{align};vertical-align:middle;padding:10px 8px;border:1px solid #ddd5c5;background-color:{background};color:#122843;overflow-wrap:break-word;">{html.escape(label)}</td>')
+        table.append('</tr>')
+    if summary.empty:
+        table.append(f'<tr><td colspan="{len(summary.columns)}" align="left" style="text-align:left;padding:10px 8px;border:1px solid #ddd5c5;">No open tasks in this email.</td></tr>')
+    table.append('</tbody></table>')
+    return ''.join(table)
+
+
 def build_email(group,sender,source_date,test_to=None):
     from interactive import excel_bytes
     from mail_reports import pdf_bytes
@@ -270,7 +297,7 @@ def build_email(group,sender,source_date,test_to=None):
     due=f"Response due: {deadline:%d %b %Y, %H:%M} Dubai (UTC+4). Email date: {sent_at:%d %b %Y, %H:%M} Dubai (UTC+4)."
     note=f"Source snapshot: {source_date}. Imported snapshot; closure and new-work updates require a new import."
     msg.set_content('\n\n'.join([intro,action,due,summary.to_string(index=False),extra,f"{len(full):,} records. Excel contains the complete source data; the PDF provides an action register.",note]))
-    msg.add_alternative('<div style="font-family:Calibri,Arial,sans-serif;color:#122843;background:#fffefa;padding:24px;border-top:4px solid #b3955b"><h2>AL BONIAN FM | '+html.escape(group['kind'])+' escalation</h2><p>'+html.escape(intro)+'</p><p>'+html.escape(action)+'</p><p><strong>'+html.escape(due)+'</strong></p><h3>Open task breakdown</h3>'+summary.to_html(index=False,escape=True,border=0).replace('<table ', '<table style="border-collapse:collapse;width:100%;text-align:left" cellpadding="8" ').replace('<th>', '<th style="background:#122843;color:#fffefa;border-bottom:2px solid #b3955b">').replace('<td>', '<td style="border-bottom:1px solid #ddd5c5">')+('<p>'+html.escape(extra)+'</p>' if extra else '')+'<p>'+str(len(full))+' records. Please review the attached Excel data and PDF action register.</p><p style="font-size:12px">'+html.escape(note)+'</p></div>',subtype='html')
+    msg.add_alternative('<div style="font-family:Calibri,Arial,sans-serif;color:#122843;background:#fffefa;padding:24px;border-top:4px solid #b3955b"><h2>AL BONIAN FM | '+html.escape(group['kind'])+' escalation</h2><p>'+html.escape(intro)+'</p><p>'+html.escape(action)+'</p><p><strong>'+html.escape(due)+'</strong></p><h3>Open task breakdown</h3>'+email_summary_html(summary)+('<p>'+html.escape(extra)+'</p>' if extra else '')+'<p>'+str(len(full))+' records. Please review the attached Excel data and PDF action register.</p><p style="font-size:12px">'+html.escape(note)+'</p></div>',subtype='html')
     full=full.copy();full['Email sent (Dubai)']=sent_at.isoformat();full['Response due (Dubai)']=deadline.isoformat()
     stem=f"ABFM_{group['kind']}_Escalation_{sent_at:%Y%m%d}"
     msg.add_attachment(excel_bytes(list(full.columns),full.itertuples(index=False,name=None)),maintype='application',subtype='vnd.openxmlformats-officedocument.spreadsheetml.sheet',filename=stem+'.xlsx')
