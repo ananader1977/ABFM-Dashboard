@@ -41,3 +41,14 @@ class EscalationTests(unittest.TestCase):
    with patch('escalation.snapshot',return_value=(root,{'imported_at':'snapshot'})), patch('escalation.priority_tasks',return_value=pd.DataFrame()), patch('escalation.open_rfqs',return_value=pd.DataFrame()), patch('escalation.routes',return_value=([group],[])), patch('escalation.send_groups',return_value=1) as send:
     run_daily(root,datetime(2026,11,7,7,59,tzinfo=TZ));self.assertEqual(send.call_count,0)
     run_daily(root,datetime(2026,11,7,8,0,tzinfo=TZ));run_daily(root,datetime(2026,11,7,8,1,tzinfo=TZ));self.assertEqual(send.call_count,1)
+ def test_manager_aliases_reconcile_counts_and_sort_unassigned_last(self):
+  from escalation import manager_counts
+  frame=pd.DataFrame({'Work Order Type':['Reactive']*6,'Status':['ACTIVE','ACTIVE','COMPLETE','ACTIVE','ACTIVE','ACTIVE'],
+    MANAGER:['# Rafik Jabbour','Rafik Jabbour','Rafik Jabbour',None,None,'Another Manager']})
+  with patch('escalation.scan',return_value=iter([frame])):
+   rows=manager_counts(Path('.'),{})
+  rafik=next(r for r in rows if r['name']=='Rafik Jabbour')
+  self.assertEqual(rafik['open'],2);self.assertEqual(rafik['total'],3)
+  self.assertEqual(rafik['aliases']['Reactive'],['# Rafik Jabbour','Rafik Jabbour'])
+  self.assertEqual(rows[0]['name'],'Rafik Jabbour');self.assertEqual(rows[-1]['name'],'(Not assigned)')
+  self.assertEqual(sum(r['open'] for r in rows),5)
