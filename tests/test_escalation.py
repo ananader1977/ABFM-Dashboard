@@ -31,3 +31,13 @@ class EscalationTests(unittest.TestCase):
  def test_sender_required_and_email_cleaning(self):
   self.assertEqual(email('ahmed.a@albonian.fm\\xa0 '),'ahmed.a@albonian.fm')
   with self.assertRaises(ValueError):send_groups([],{},'date')
+
+ def test_daily_schedule_deduplicates_and_skips_outside_eight_am(self):
+  from escalation import run_daily,save_config,TZ
+  from datetime import datetime
+  with tempfile.TemporaryDirectory() as d:
+   root=Path(d);save_config(root,{'enabled':True})
+   group={'kind':'Operations','to':'manager@example.com','cc':['director@example.com','coo@example.com'],'records':[{'WO No.':'1'}]}
+   with patch('escalation.snapshot',return_value=(root,{'imported_at':'snapshot'})), patch('escalation.priority_tasks',return_value=pd.DataFrame()), patch('escalation.open_rfqs',return_value=pd.DataFrame()), patch('escalation.routes',return_value=([group],[])), patch('escalation.send_groups',return_value=1) as send:
+    run_daily(root,datetime(2026,11,7,7,59,tzinfo=TZ));self.assertEqual(send.call_count,0)
+    run_daily(root,datetime(2026,11,7,8,0,tzinfo=TZ));run_daily(root,datetime(2026,11,7,8,1,tzinfo=TZ));self.assertEqual(send.call_count,1)
