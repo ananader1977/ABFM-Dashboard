@@ -52,3 +52,19 @@ class EscalationTests(unittest.TestCase):
   self.assertEqual(rafik['aliases']['Reactive'],['# Rafik Jabbour','Rafik Jabbour'])
   self.assertEqual(rows[0]['name'],'Rafik Jabbour');self.assertEqual(rows[-1]['name'],'(Not assigned)')
   self.assertEqual(sum(r['open'] for r in rows),5)
+ def test_gmail_app_password_spaces_and_empty_environment_override(self):
+  from escalation import smtp_settings
+  config={'smtp':{'host':'smtp.gmail.com','username':'sender@example.com','password':'aaaa bbbb cccc dddd','sender':'sender@example.com','port':'587'}}
+  with patch.dict('os.environ',{'ABFM_SMTP_PASSWORD':''}):
+   self.assertEqual(smtp_settings(config)['password'],'aaaabbbbccccdddd')
+ def test_smtp_check_sends_nothing_and_partial_failure_is_explicit(self):
+  from escalation import check_connection,DeliveryFailure
+  config={'smtp':{'host':'smtp.gmail.com','username':'sender@example.com','password':'synthetic','sender':'sender@example.com','port':'587'}}
+  with patch('escalation.smtplib.SMTP') as smtp:
+   client=smtp.return_value
+   self.assertTrue(check_connection(config));client.send_message.assert_not_called()
+   groups=[{'kind':'Operations','to':'manager@example.com','cc':['director@example.com','coo@example.com'],'records':[{'WO No.':'1'}]},
+     {'kind':'Procurement','to':'buyer@example.com','cc':['director@example.com','coo@example.com'],'records':[{'Reference Number':'R1'}]}]
+   client.send_message.side_effect=[{},TimeoutError('network')]
+   with self.assertRaises(DeliveryFailure) as error:send_groups(groups,config,'snapshot')
+   self.assertEqual(error.exception.accepted,1);self.assertIn('do not resend',str(error.exception))
