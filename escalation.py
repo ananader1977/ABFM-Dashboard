@@ -339,6 +339,16 @@ def admin_panel(root):
         try:
             config=import_roster(roster,root);st.success('Recipient sheets imported privately. Sending remains at its existing setting.')
         except ValueError as exc:st.error(str(exc))
+    with st.expander('Import recipient configuration'):
+        st.caption('Alternative to the workbook uploader: paste the verified recipient JSON into this authenticated form.')
+        pasted=st.text_area('Recipient configuration JSON',key='recipient_json_paste')
+        if st.button('Import pasted recipient configuration'):
+            try:
+                import io
+                payload=io.StringIO(pasted);payload.name='recipients.json'
+                config=import_roster(payload,root)
+                st.success('Recipient configuration imported privately.')
+            except (ValueError,TypeError,KeyError) as exc:st.error(str(exc))
     directory,manifest=snapshot(root)
     tasks=priority_tasks(directory,manifest);rfqs=open_rfqs(directory,manifest)
     groups,issues=routes(tasks,rfqs,config)
