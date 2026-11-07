@@ -164,7 +164,7 @@ def filters(frame, table, source_columns=None):
     return result
 
 
-def metric_cards(metrics):
+def metric_cards(metrics, page=None):
     entries = list(metrics.items())
     total = metrics.get("Total work orders", metrics.get("Records"))
     completion = next((value for label, value in entries if "completion" in label.lower() and "%" in label), None)
@@ -172,8 +172,16 @@ def metric_cards(metrics):
         columns = st.columns(4)
         for column, (label, value) in zip(columns, entries[offset:offset + 4]):
             display = "—" if value is None else f"{value:,.1f}%" if "%" in label else f"{value:,.2f}" if "AED" in label else f"{value:,.0f}"
-            percentage = (value if "%" in label else 100 * value / total if total and value is not None else None) if "open" in label.lower() else completion
-            styled_metric(column, label, display, percentage=percentage, key=label)
+            if '%' in label:
+                percentage=value
+            elif label in {'Total work orders','Completed','Open','Cancelled','Other status'} or 'open' in label.lower():
+                percentage=100*value/total if total and value is not None else None
+            else:
+                percentage=completion
+            share_label=None
+            if page in {'Corrective','Pro-active'} and label in {'Total work orders','Completed','Open','Cancelled'}:
+                share_label=(f'{percentage:.2f}%' if percentage is not None else '—')+' of selected work orders'
+            styled_metric(column, label, display, percentage=percentage, key=label,share_label=share_label)
 
 
 def source_charts(page, frame, table):
@@ -346,7 +354,7 @@ def run():
     metrics, insights = summarize(selected, table, page_name)
     with metrics_slot:
         st.caption(f"{len(selected):,} selected records / {tab_total:,} records in this tab • Dataset: {table}")
-        metric_cards(metrics)
+        metric_cards(metrics,page=page_name)
     with st.expander(f"Action highlights · {len(insights)} review point(s)", expanded=False):
         st.caption("Calculated from the current selection.")
         for insight in insights:
