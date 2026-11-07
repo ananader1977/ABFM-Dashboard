@@ -25,6 +25,9 @@ RULES = {
 
 
 def scope_frame(frame, rule):
+    if isinstance(rule,dict) and rule.get('kind') == 'rfq_assignee':
+        from escalation import ASSIGNEE, key
+        return frame.loc[normalized(frame.Status).isin({'IN PROGRESS','RETURNED'}) & frame[ASSIGNEE].map(key).eq(key(rule['name']))]
     if rule=='wo_completed':return frame.loc[normalized(frame[resolve(frame,'Status')]).isin(COMPLETED)]
     if rule=='wo_cancelled':return frame.loc[normalized(frame[resolve(frame,'Status')]).eq('CANCELLED')]
     if rule=='wo_other':return frame.loc[~normalized(frame[resolve(frame,'Status')]).isin(OPEN | COMPLETED | {'CANCELLED'})]
@@ -132,19 +135,14 @@ def render(directory,manifest,pages):
         columns[3].metric('Positive unbilled balance · AED',f"{data['positive_balance']:,.2f}")
     heading('OPEN WORK & ACTION QUEUE','Review records across your workspaces')
     st.caption('Each card shows its own rule. These counts are not added into a global total because workspaces can overlap and use different record units.')
-    for offset in range(0,len(data['rows']),3):
-        columns=st.columns(3,gap='medium')
-        for column,row in zip(columns,data['rows'][offset:offset+3]):
-            with column,st.container(border=True):
-                value='—' if row['count'] is None else f"{row['count']:,}"
-                st.markdown(f'<div class="chart-kicker">{html.escape(row["page"])}</div><div class="queue-value">{value}</div><div class="queue-label">{html.escape(row["label"])}</div>',unsafe_allow_html=True)
-                percentage = None if row['count'] is None or not row['total'] else 100 * row['count'] / row['total']
-                share = '—' if percentage is None else f'{percentage:.2f}%'
-                share_color = '#65758a' if percentage is None or percentage == 5 else '#b42318' if percentage > 5 else '#16703d'
-                st.markdown(f'<div class="queue-label"><strong style="color:{share_color}">{share}</strong> of {row["total"]:,} workspace records</div>', unsafe_allow_html=True)
-                st.caption(row['definition'])
-                if row['count'] is not None:
-                    st.button('View matching records',key='queue_'+row['page'],on_click=navigate,args=(row['page'],row['rule'],row['table']),width='stretch')
+    from escalation import review_cards
+    if manifest.get('work_order_source'):
+        review_cards(directory, manifest)
+    else:
+        for row in data['rows']:
+            st.metric(row['page'], '—' if row['count'] is None else f"{row['count']:,}")
+            if row['count'] is not None:
+                st.button('View matching records',key='queue_'+row['page'],on_click=navigate,args=(row['page'],row['rule'],row['table']))
     from interactive import chart, selection_values, excel_bytes
     def status_click(key, page):
         values = selection_values(st.session_state.get(key, {}))
@@ -157,6 +155,8 @@ def render(directory,manifest,pages):
             rows = [{'Category':label,'Records':values[name]} for label,name in [('Open','Open'),('Completed','Completed'),('Cancelled','Cancelled'),('Other','Other status')]]
             key = 'summary_status_' + page
             chart(pd.DataFrame(rows), key, lambda k=key,p=page: status_click(k,p), page)
+    from escalation import executive_panels
+    executive_panels(directory, manifest)
     left, right = st.columns(2)
     with left:
         included = [r for r in data['rows'] if r['count'] is not None]
