@@ -264,6 +264,8 @@ def run():
     with st.sidebar:
         brand()
         st.caption(f"{user['username']} · {user['role']}")
+        st.link_button("Download / install mobile app", "/mobile/", use_container_width=True)
+        st.caption("Android · iPhone · iPad")
         st.title("FM Dashboard")
         directory, manifest = snapshot()
         available_pages = [p["name"] for p in manifest["pages"] if p["name"] not in REMOVED_PAGES and p['name'] != EXECUTIVE_PAGE] if manifest else []
