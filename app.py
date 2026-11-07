@@ -158,12 +158,14 @@ def filters(frame, table, source_columns=None):
 
 def metric_cards(metrics):
     entries = list(metrics.items())
+    total = metrics.get("Total work orders", metrics.get("Records"))
     completion = next((value for label, value in entries if "completion" in label.lower() and "%" in label), None)
     for offset in range(0, len(entries), 4):
         columns = st.columns(4)
         for column, (label, value) in zip(columns, entries[offset:offset + 4]):
             display = "—" if value is None else f"{value:,.1f}%" if "%" in label else f"{value:,.2f}" if "AED" in label else f"{value:,.0f}"
-            styled_metric(column, label, display, percentage=completion, key=label)
+            percentage = (value if "%" in label else 100 * value / total if total and value is not None else None) if "open" in label.lower() else completion
+            styled_metric(column, label, display, percentage=percentage, key=label)
 
 
 def source_charts(page, frame, table):
