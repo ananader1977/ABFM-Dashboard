@@ -126,7 +126,11 @@ def render(directory,manifest,pages):
     columns=st.columns(4)
     if manifest.get('work_order_source'):
         for column, label, metric in zip(columns, ['Total work orders','Completed work orders','Open work orders','Cancelled work orders'], ['Total work orders','Completed','Open','Cancelled']):
-            column.metric(label, f"{sum(v[metric] for v in stats.values()):,}")
+            value = sum(v[metric] for v in stats.values())
+            grand_total = sum(v['Total work orders'] for v in stats.values())
+            share = '—' if not grand_total else f'{100 * value / grand_total:.2f}%'
+            breakdown = ''.join(f'<div style="display:flex;justify-content:space-between;gap:8px;margin-top:8px"><span>{html.escape(kind)}</span><strong>{stats.get(kind,{}).get(metric,0):,}</strong></div>' for kind in ['Reactive','PPM','Corrective','Pro-active'])
+            column.markdown(f'<div style="background:#fffefa;border:1px solid #ddd5c5;border-top:3px solid #b3955b;border-radius:15px;padding:19px 21px;min-height:265px;box-shadow:0 7px 24px #12284307"><div style="color:#67778b;font-size:.76rem">{html.escape(label)}</div><div class="queue-value" style="font-size:2rem">{value:,}</div><div style="font-size:.8rem;color:#122843;margin:8px 0 14px"><strong>{share}</strong> of all work orders</div><div style="border-top:1px solid #e5dece;padding-top:5px;font-size:.76rem;color:#65758a">{breakdown}</div></div>',unsafe_allow_html=True)
     else:
         columns[0].metric('Open work orders',f"{sum(v['Open'] for v in stats.values()):,}")
         columns[1].metric('Overdue open work orders',f"{sum(v['Overdue open'] for v in stats.values()):,}" if data['due_available'] else '—')
