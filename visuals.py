@@ -63,7 +63,7 @@ h1,h2{font-family:Georgia,'Times New Roman',serif!important;font-weight:500!impo
 
 
 def status_style(label, percentage=None):
-    if re.search(r'\bopen\b', label, flags=re.I) and percentage is not None:
+    if re.search(r'\b(?:open|expired)\b', label, flags=re.I) and percentage is not None:
         if percentage > 10:
             return '#b42318', '700', 'red'
         if percentage > 5:
