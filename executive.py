@@ -8,7 +8,7 @@ import pyarrow as pa
 import pyarrow.dataset as ds
 import streamlit as st
 from analytics import TASK_TYPES, OPEN, COMPLETED, normalized, resolve, numbers, dates, today, work_order_metrics
-from visuals import page_header, heading, ring, bars, draw, INK, GOLD, SILVER
+from visuals import page_header, heading, ring, bars, draw, INK, GOLD, SILVER, status_style, styled_metric
 
 PAGE = 'Executive Summary'
 RULES = {
@@ -128,14 +128,16 @@ def render(directory,manifest,pages):
         for column, label, metric in zip(columns, ['Total work orders','Completed work orders','Open work orders','Cancelled work orders'], ['Total work orders','Completed','Open','Cancelled']):
             value = sum(v[metric] for v in stats.values())
             grand_total = sum(v['Total work orders'] for v in stats.values())
-            share = '—' if not grand_total else f'{100 * value / grand_total:.2f}%'
-            breakdown = ''.join(f'<div style="display:flex;justify-content:space-between;gap:8px;margin-top:8px"><span>{html.escape(kind)}</span><strong>{stats.get(kind,{}).get(metric,0):,}</strong></div>' for kind in ['Reactive','PPM','Corrective','Pro-active'])
-            column.markdown(f'<div style="background:#fffefa;border:1px solid #ddd5c5;border-top:3px solid #b3955b;border-radius:15px;padding:19px 21px;min-height:265px;box-shadow:0 7px 24px #12284307"><div style="color:#67778b;font-size:.76rem">{html.escape(label)}</div><div class="queue-value" style="font-size:2rem">{value:,}</div><div style="font-size:.8rem;color:#122843;margin:8px 0 14px"><strong>{share}</strong> of all work orders</div><div style="border-top:1px solid #e5dece;padding-top:5px;font-size:.76rem;color:#65758a">{breakdown}</div></div>',unsafe_allow_html=True)
+            percentage = None if not grand_total else 100 * value / grand_total
+            share = '—' if percentage is None else f'{percentage:.2f}%'
+            tone, weight, _ = status_style(label, percentage)
+            breakdown = ''.join(f'<div style="display:flex;justify-content:space-between;gap:8px;margin-top:8px"><span>{html.escape(kind)}</span><strong style="color:{tone};font-weight:{weight}">{stats.get(kind,{}).get(metric,0):,}</strong></div>' for kind in ['Reactive','PPM','Corrective','Pro-active'])
+            column.markdown(f'<div style="background:#fffefa;border:1px solid #ddd5c5;border-top:3px solid #b3955b;border-radius:15px;padding:19px 21px;min-height:265px;box-shadow:0 7px 24px #12284307"><div style="color:#67778b;font-size:.76rem;color:{tone};font-weight:{weight}">{html.escape(label)}</div><div class="queue-value" style="font-size:2rem;color:{tone};font-weight:{weight}">{value:,}</div><div style="font-size:.8rem;color:{tone};font-weight:{weight};margin:8px 0 14px"><strong>{share}</strong> of all work orders</div><div style="border-top:1px solid #e5dece;padding-top:5px;font-size:.76rem;color:#65758a">{breakdown}</div></div>',unsafe_allow_html=True)
     else:
-        columns[0].metric('Open work orders',f"{sum(v['Open'] for v in stats.values()):,}")
-        columns[1].metric('Overdue open work orders',f"{sum(v['Overdue open'] for v in stats.values()):,}" if data['due_available'] else '—')
+        styled_metric(columns[0], 'Open work orders', f"{sum(v['Open'] for v in stats.values()):,}", key='executive_open')
+        styled_metric(columns[1], 'Overdue open work orders', f"{sum(v['Overdue open'] for v in stats.values()):,}" if data['due_available'] else '—', key='executive_overdue')
         rfq=next((r['count'] for r in data['rows'] if r['page']=='RFQ'),None)
-        columns[2].metric('Open RFQs','—' if rfq is None else f'{rfq:,}')
+        styled_metric(columns[2], 'Open RFQs', '—' if rfq is None else f'{rfq:,}', key='executive_rfq')
         columns[3].metric('Positive unbilled balance · AED',f"{data['positive_balance']:,.2f}")
     heading('OPEN WORK & ACTION QUEUE','Review records across your workspaces')
     st.caption('Each card shows its own rule. These counts are not added into a global total because workspaces can overlap and use different record units.')
