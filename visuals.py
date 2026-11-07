@@ -64,6 +64,7 @@ h1,h2{font-family:Calibri,Arial,sans-serif!important;font-weight:500!important}
 [class*="st-key-task_links_"] .stButton button{font-size:.72rem;min-height:26px;padding:0;color:#122843;text-decoration:underline;white-space:nowrap}
 [class*="st-key-task_links_"] .stButton button p{font-size:.72rem;white-space:nowrap}
 [class*="st-key-task_links_"] .stButton button:hover{color:#9b804a}
+.st-key-mobile_workspace_navigation{display:none}
 /* Keep the navigation and dashboard in separate layout tracks at every width. */
 [data-testid="stAppViewContainer"] > div:has(> [data-testid="stMain"]){position:relative!important;flex:1 1 0%!important;min-width:0!important;width:0!important}
 [data-testid="stMain"]{min-width:0!important;width:100%!important}
@@ -73,12 +74,10 @@ h1,h2{font-family:Calibri,Arial,sans-serif!important;font-weight:500!important}
 [data-testid="stSidebar"] [data-testid="stLinkButton"] a{background:transparent;color:#f2e8d3;border-color:#b3955b77}
 [data-testid="stSidebar"] [data-testid="stLinkButton"] a:hover{background:#b3955b24;color:#fffefa}
 @media(max-width:900px){
+ .st-key-mobile_workspace_navigation{display:block;margin-bottom:1rem}
+ [data-testid="stSidebar"],[data-testid="stExpandSidebarButton"]{display:none!important}
+
  [data-testid="stAppViewContainer"]{flex-direction:column!important;overflow:hidden!important}
- [data-testid="stSidebar"][data-collapsed="true"]{display:none!important}
- [data-testid="stSidebar"][data-collapsed="false"]{position:relative!important;transform:none!important;width:100%!important;min-width:0!important;max-width:100%!important;height:auto!important;max-height:45dvh!important;flex:0 0 auto!important;box-shadow:none!important}
- [data-testid="stSidebarContent"]{height:auto!important;max-height:45dvh;overflow-y:auto!important}
- [data-testid="stSidebar"] .brand{padding:4px 0 12px;margin-bottom:10px}
- [data-testid="stSidebar"] .brand img{max-width:150px}
  [data-testid="stAppViewContainer"] > div:has(> [data-testid="stMain"]){width:100%!important;height:auto!important;min-height:0!important;flex:1 1 0%!important}
  [data-testid="stMain"]{position:relative!important;height:100%!important;min-height:0!important}
  .block-container{padding-top:4.5rem!important;padding-left:1rem!important;padding-right:1rem!important}
