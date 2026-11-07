@@ -12,12 +12,13 @@ TEAL = '#527B73'
 PALETTE = [INK, GOLD, SILVER, TEAL, '#D6C49D', '#657A93', '#DEDAD1']
 
 CSS = '''<style>
+html,body,.stApp,input,button,textarea,select{font-family:Calibri,Arial,sans-serif}
 :root{--ink:#122843;--gold:#b3955b;--paper:#f7f5f0}
 .stApp{background:linear-gradient(145deg,#faf9f6 0%,#f1eee7 100%);color:var(--ink)}
 [data-testid="stHeader"]{background:rgba(250,249,246,.94)}
 .block-container{max-width:1600px;padding-top:2.2rem;padding-bottom:3rem}
 h1,h2,h3{color:var(--ink);letter-spacing:-.025em}
-h1,h2{font-family:Georgia,'Times New Roman',serif!important;font-weight:500!important}
+h1,h2{font-family:Calibri,Arial,sans-serif!important;font-weight:500!important}
 [data-testid="stSidebar"]{background:linear-gradient(170deg,#142c49,#0b1b30);border-right:1px solid #b3955b66}
 [data-testid="stSidebar"] p,[data-testid="stSidebar"] label,[data-testid="stSidebar"] h1,[data-testid="stSidebar"] h2,[data-testid="stSidebar"] h3{color:#f5f2e9!important}
 [data-testid="stSidebar"] [data-testid="stCaptionContainer"] p{color:#bec8d4!important;font-size:.78rem}
@@ -37,7 +38,7 @@ h1,h2{font-family:Georgia,'Times New Roman',serif!important;font-weight:500!impo
 .hero-meta{color:#c5cdda;font-size:.78rem;letter-spacing:.025em}
 [data-testid="stMetric"]{background:#fffefa;border:1px solid #ddd5c5;border-top:3px solid #b3955b;border-radius:12px;padding:11px 14px;box-shadow:0 7px 24px #12284307;min-height:84px;margin-bottom:4px}
 [data-testid="stMetricLabel"]{color:#67778b;font-size:.76rem;letter-spacing:.035em}
-[data-testid="stMetricValue"]{font-family:Georgia,'Times New Roman',serif;color:#122843;font-size:1.65rem!important;font-weight:500}
+[data-testid="stMetricValue"]{font-family:Calibri,Arial,sans-serif;color:#122843;font-size:1.65rem!important;font-weight:500}
 [data-testid="stForm"], [data-testid="stExpander"]{background:#fffefa;border:1px solid #ddd5c5;border-radius:14px}
 [data-testid="stForm"]{padding:22px}
 [data-testid="stVerticalBlockBorderWrapper"]{border-radius:16px!important;border-color:#ded6c6!important}
@@ -47,8 +48,8 @@ h1,h2{font-family:Georgia,'Times New Roman',serif!important;font-weight:500!impo
 [data-testid="stTextInput"] input,[data-testid="stSelectbox"] [data-baseweb="select"]{border-radius:9px}
 [data-testid="stPlotlyChart"],[data-testid="stVegaLiteChart"]{background:#fffefa;border:1px solid #e0d9cc;border-radius:16px;overflow:hidden;box-shadow:0 6px 24px #12284305}
 .chart-kicker{font-size:.65rem;letter-spacing:.16em;color:#9b804a;font-weight:650;text-transform:uppercase;margin:8px 0}
-.chart-heading{font-family:Georgia,'Times New Roman',serif;font-size:1.35rem;color:#122843;margin:0 0 12px;line-height:1.35}
-.queue-value{font-family:Georgia,'Times New Roman',serif;font-size:1.9rem;color:#122843;line-height:1.2;margin:4px 0}
+.chart-heading{font-family:Calibri,Arial,sans-serif;font-size:1.35rem;color:#122843;margin:0 0 12px;line-height:1.35}
+.queue-value{font-family:Calibri,Arial,sans-serif;font-size:1.9rem;color:#122843;line-height:1.2;margin:4px 0}
 .queue-label{font-size:.8rem;color:#65758a;letter-spacing:.025em;margin-bottom:10px}
 [data-testid="stCaptionContainer"]{color:#6b7888}
 @media(max-width:760px){.executive-hero{padding:23px}.executive-hero h1{font-size:2rem!important}.block-container{padding:1.4rem 1rem}.brand{padding:18px}[data-testid="stMetricValue"]{font-size:1.6rem!important}}
@@ -59,7 +60,11 @@ h1,h2{font-family:Georgia,'Times New Roman',serif!important;font-weight:500!impo
 [class*="st-key-compact_review_"] [data-testid="stVerticalBlock"]{gap:.35rem}
 [class*="st-key-compact_review_"] [data-testid="stMetric"]{padding:8px 10px;min-height:72px;margin-bottom:0}
 [class*="st-key-compact_review_"] .stButton button{min-height:34px;font-size:.78rem}
-</style>'''
+[class*="st-key-task_links_"] [data-testid="stHorizontalBlock"]{gap:3px}
+[class*="st-key-task_links_"] .stButton button{font-size:.72rem;min-height:26px;padding:0;color:#122843;text-decoration:underline;white-space:nowrap}
+[class*="st-key-task_links_"] .stButton button p{font-size:.72rem;white-space:nowrap}
+[class*="st-key-task_links_"] .stButton button:hover{color:#9b804a}
+</style>''' 
 
 
 def status_style(label, percentage=None):
@@ -89,7 +94,7 @@ def page_header(name, imported_at):
 
 def polish(figure, height=360):
     figure.update_layout(template='plotly_white', paper_bgcolor='#fffefa', plot_bgcolor='#fffefa',
-                         font=dict(family='Arial, sans-serif', size=12, color=INK),
+                         font=dict(family='Calibri, Arial, sans-serif', size=12, color=INK),
                          margin=dict(l=24,r=22,t=25,b=35), height=height,
                          legend=dict(orientation='h',y=-.18,x=0,font=dict(size=11)),
                          hoverlabel=dict(bgcolor=INK,font_color='white'),
@@ -127,7 +132,7 @@ def distribution(series):
 
 def draw(data, spec, key, height=360):
     spec = dict(spec, height=height, background='#fffefa')
-    spec['config'] = {'font':'Arial','view':{'stroke':None},
+    spec['config'] = {'font':'Calibri','view':{'stroke':None},
                       'axis':{'labelColor':INK,'titleColor':INK,'gridColor':'#eae5da','domain':False,'ticks':False,'labelPadding':9,'titleFontWeight':'normal','labelFontSize':11},
                       'legend':{'labelColor':INK,'titleColor':INK,'labelFontSize':11,'orient':'bottom','title':None,'symbolType':'circle'}}
     st.vega_lite_chart(data,spec,use_container_width=True,theme=None,key=key)
@@ -147,7 +152,7 @@ def ring(counts, key, caption='Records'):
                      'color':{'field':'Category','type':'nominal','scale':{'domain':list(data.Category),'range':PALETTE},'legend':{'columns':2,'labelLimit':180}},
                      'tooltip':[{'field':'Category','type':'nominal'},{'field':'Records','type':'quantitative','format':','},{'field':'Share','type':'quantitative','format':'.1%'}]}}
     draw(data,{'layer':[arc,
-        {'data':{'values':[{'label':f'{total:,}'}]},'mark':{'type':'text','font':'Georgia','fontSize':28,'color':INK,'dy':-8},'encoding':{'text':{'field':'label'}}},
+        {'data':{'values':[{'label':f'{total:,}'}]},'mark':{'type':'text','font':'Calibri','fontSize':28,'color':INK,'dy':-8},'encoding':{'text':{'field':'label'}}},
         {'data':{'values':[{'label':caption.upper()}]},'mark':{'type':'text','fontSize':9,'color':'#788494','dy':15},'encoding':{'text':{'field':'label'}}}]},key)
 
 
