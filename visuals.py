@@ -54,14 +54,22 @@ h1,h2{font-family:Georgia,'Times New Roman',serif!important;font-weight:500!impo
 @media(max-width:760px){.executive-hero{padding:23px}.executive-hero h1{font-size:2rem!important}.block-container{padding:1.4rem 1rem}.brand{padding:18px}[data-testid="stMetricValue"]{font-size:1.6rem!important}}
 [class*="st-key-metric_status_red_"] [data-testid="stMetricValue"], [class*="st-key-metric_status_red_"] [data-testid="stMetricLabel"] * {color:#b42318!important;font-weight:700!important}
 [class*="st-key-metric_status_green_"] [data-testid="stMetricValue"], [class*="st-key-metric_status_green_"] [data-testid="stMetricLabel"] * {color:#16703d!important;font-weight:700!important}
+[class*="st-key-metric_status_orange_"] [data-testid="stMetricValue"], [class*="st-key-metric_status_orange_"] [data-testid="stMetricLabel"] * {color:#c66a00!important;font-weight:700!important}
+[class*="st-key-metric_status_lightgreen_"] [data-testid="stMetricValue"], [class*="st-key-metric_status_lightgreen_"] [data-testid="stMetricLabel"] * {color:#6b9f5c!important;font-weight:700!important}
 </style>'''
 
 
 def status_style(label, percentage=None):
-    if re.search(r'\bopen\b', label, flags=re.I) and percentage is not None and percentage > 5:
-        return '#b42318', '700', 'red'
-    if re.search(r'complet(?:ed|ion)', label, flags=re.I) and percentage is not None and percentage >= 95:
-        return '#16703d', '700', 'green'
+    if re.search(r'\bopen\b', label, flags=re.I) and percentage is not None:
+        if percentage > 10:
+            return '#b42318', '700', 'red'
+        if percentage > 5:
+            return '#c66a00', '700', 'orange'
+    if re.search(r'complet(?:ed|ion)', label, flags=re.I) and percentage is not None:
+        if percentage >= 95:
+            return '#16703d', '700', 'green'
+        if percentage >= 90:
+            return '#6b9f5c', '700', 'lightgreen'
     return INK, '500', 'normal'
 
 
