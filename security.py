@@ -18,6 +18,8 @@ def connect(root):
     db.execute("CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('admin','operations')), active INTEGER NOT NULL DEFAULT 1, version INTEGER NOT NULL DEFAULT 1)")
     db.execute("CREATE TABLE IF NOT EXISTS attempts (username TEXT PRIMARY KEY, failures INTEGER, locked_until REAL)")
     db.execute("CREATE TABLE IF NOT EXISTS audit (at REAL, actor TEXT, action TEXT, target TEXT)")
+    db.execute('CREATE TABLE IF NOT EXISTS browser_sessions (token_hash TEXT PRIMARY KEY,username TEXT NOT NULL,version INTEGER NOT NULL,expires REAL NOT NULL)')
+    db.execute('CREATE INDEX IF NOT EXISTS browser_session_expiry ON browser_sessions(expires)')
     db.commit()
     return db
 
@@ -144,3 +146,58 @@ def apply_approved_admin_reset(root, payload):
 
 if __name__ == "__main__":
     bootstrap(os.environ.get("ABFM_DATA_DIR", "data"))
+
+
+SESSION_COOKIE = '__Host-abfm_session'
+SESSION_LIFETIME = 8 * 3600
+
+
+def create_browser_session(root, user):
+    """Persist only a token digest; keep the existing eight-hour access window."""
+    token = secrets.token_urlsafe(32)
+    now = time.time()
+    with connect(root) as db:
+        current = db.execute('SELECT version FROM users WHERE username=? AND active=1', (user['username'],)).fetchone()
+        if not current or current['version'] != user['version']:
+            raise ValueError('Account changed. Sign in again.')
+        db.execute('DELETE FROM browser_sessions WHERE expires<=?', (now,))
+        db.execute('INSERT INTO browser_sessions VALUES (?,?,?,?)',
+                   (hashlib.sha256(token.encode()).hexdigest(), user['username'], user['version'], now + SESSION_LIFETIME))
+    return token
+
+
+def browser_session_user(root, token):
+    if not token or not isinstance(token,str) or len(token)>128:
+        return None
+    with connect(root) as db:
+        row = db.execute('''SELECT u.username,u.role,u.version FROM browser_sessions s
+            JOIN users u ON u.username=s.username
+            WHERE s.token_hash=? AND s.expires>? AND u.active=1 AND u.version=s.version''',
+            (hashlib.sha256(token.encode()).hexdigest(),time.time())).fetchone()
+        return dict(row) if row else None
+
+
+def revoke_browser_session(root, token):
+    if token and isinstance(token,str) and len(token)<=128:
+        with connect(root) as db:
+            db.execute('DELETE FROM browser_sessions WHERE token_hash=?', (hashlib.sha256(token.encode()).hexdigest(),))
+
+
+def configure_connection_secret(root):
+    """Keep Streamlit's XSRF signing key private and stable across service restarts."""
+    import os
+    if os.environ.get('STREAMLIT_SERVER_COOKIE_SECRET'):
+        return
+    root=Path(root);root.mkdir(parents=True,exist_ok=True)
+    path=root/'streamlit_cookie_secret'
+    try:
+        descriptor=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+    except FileExistsError:
+        pass
+    else:
+        with os.fdopen(descriptor,'w') as target:
+            target.write(secrets.token_urlsafe(48))
+    path.chmod(0o600)
+    secret=path.read_text().strip()
+    if len(secret)<32:raise ValueError('The private connection signing key is invalid.')
+    os.environ['STREAMLIT_SERVER_COOKIE_SECRET']=secret
