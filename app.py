@@ -252,6 +252,10 @@ def source_charts(page, frame, table):
     return skips
 
 
+def choose_mobile_workspace():
+    st.session_state['workspace_page'] = st.session_state['mobile_workspace_page']
+
+
 def run():
     # Plotly figures contain reference cycles. Reclaim prior views before reading
     # the next dataset so repeated chart changes do not retain their buffers.
@@ -276,6 +280,16 @@ def run():
             st.session_state.clear()
             st.rerun()
         st.caption("Calculated insights • No external AI")
+    with st.container(key='mobile_workspace_navigation'):
+        if options:
+            if st.session_state.get('mobile_workspace_page') != page_name:
+                st.session_state['mobile_workspace_page'] = page_name
+            st.selectbox('Go to page', options, format_func=lambda name: PAGE_LABELS.get(name, name), key='mobile_workspace_page', on_change=choose_mobile_workspace)
+        install, sign_out = st.columns([2,1])
+        install.link_button('Install app', '/mobile/', use_container_width=True)
+        if sign_out.button('Sign out', key='mobile_sign_out', use_container_width=True):
+            st.session_state.clear()
+            st.rerun()
     if page_name == "Administration":
         admin_panel(user)
         return
