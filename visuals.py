@@ -56,7 +56,7 @@ h1,h2{font-family:Georgia,'Times New Roman',serif!important;font-weight:500!impo
 
 def page_header(name, imported_at):
     stamp = str(imported_at)[:16].replace('T', ' ')
-    st.markdown(f'<section class="executive-hero"><div class="eyebrow">AL BONIAN FM · EXECUTIVE WORKSPACE</div><h1>{html.escape(name)}</h1><div class="hero-meta">Operations intelligence &nbsp; / &nbsp; Snapshot imported {html.escape(stamp)} UTC</div></section>', unsafe_allow_html=True)
+    st.markdown(f'<section class="executive-hero"><div class="eyebrow">AL BONIAN FM · OPERATION WORKSPACE</div><h1>{html.escape(name)}</h1><div class="hero-meta">Operations intelligence &nbsp; / &nbsp; Snapshot imported {html.escape(stamp)} UTC</div></section>', unsafe_allow_html=True)
 
 
 def polish(figure, height=360):
