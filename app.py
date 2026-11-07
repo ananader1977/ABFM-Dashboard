@@ -15,7 +15,7 @@ from analytics import PAGE_TABLES, TASK_TYPES, aggregate, dates, field_reference
 from brand import LOGO
 from security import authenticate, connect, current_user, save_user, rename_user
 from interactive import linked_charts, quick_filters, records_panel
-from work_orders import install_replacement
+from work_orders import install_excel_replacement, excel_sheet_names, preview_excel
 from measures import measure
 from data_access import load_table, load_rows, display_columns, source_visuals, SOURCE_VISUAL_TYPES
 from visuals import CSS, page_header, polish, overview, styled_metric
@@ -97,17 +97,25 @@ def admin_panel(user):
             except (ValueError, PermissionError) as e:
                 st.error(str(e))
     st.subheader("Replace work-order data")
-    st.caption("Updates work orders using the approved fields and status rules; MR Tracker, RFQ and subcontractor datasets remain available. Previous snapshots are retained for recovery. Upload the prepared Parquet version of the workbook.")
-    replacement = st.file_uploader("Prepared work-order data", type=["parquet"], key="replacement_work_order_upload")
-    if replacement and st.button("Apply replacement work orders"):
+    st.caption("Upload the complete updated Excel (.xlsx) export in the Anas - All Work Orders format. This replaces Reactive, PPM, Corrective and Pro-active records. MR Tracker, RFQ and subcontractor agreements stay as they are. Previous snapshots remain available for recovery.")
+    replacement = st.file_uploader("Updated work-order Excel workbook", type=["xlsx"], key="replacement_work_order_excel_upload")
+    if replacement:
         try:
-            with st.spinner("Validating and saving work orders…"):
-                report = install_replacement(replacement, ROOT)
-                from work_orders import restore_requested_workspaces
-                restore_requested_workspaces(ROOT)
-            st.cache_data.clear()
-            st.success(f"Replaced work orders: {report['rows']:,} records. Work orders updated; restored MR, RFQ and subcontractor datasets retained.")
-        except (ValueError, KeyError) as error:
+            sheets=excel_sheet_names(replacement)
+            preferred=next((i for i,name in enumerate(sheets) if 'work order' in name.casefold() or 'workorder' in name.casefold()),0)
+            sheet=st.selectbox('Work-order worksheet',sheets,index=preferred,key='replacement_work_order_sheet')
+            preview=preview_excel(replacement,sheet)
+            st.caption('First five data rows. Headings must be in row 1; the complete sheet is validated when you apply the replacement. Other sheets in this workbook are not imported.')
+            st.dataframe(preview,hide_index=True,width='stretch')
+            if st.button("Apply replacement work orders"):
+                with st.spinner("Reading Excel, validating records and replacing work orders…"):
+                    report = install_excel_replacement(replacement, ROOT, sheet)
+                st.cache_data.clear()
+                st.success(f"Replaced work orders: {report['rows']:,} records. MR Tracker, RFQ and subcontractor datasets retained. Reopen Executive Summary to see the updated counts.")
+                if report.get('blank_priority_rows'):
+                    st.info(f"{report['blank_priority_rows']:,} records have blank priority and were retained. Records without priority are excluded from P1/P2 escalation.")
+                st.caption('Imported types: '+', '.join(f'{name}: {count:,}' for name,count in report['counts'].items()))
+        except (ValueError,KeyError,TypeError,OSError) as error:
             st.error(str(error))
     from escalation import admin_panel as escalation_admin
     escalation_admin(ROOT)
@@ -305,7 +313,7 @@ def run():
     page = next(p for p in manifest["pages"] if p["name"] == page_name)
     page_header(PAGE_LABELS.get(page_name, page_name), manifest.get('work_order_source', {}).get('imported_at', manifest['imported_at']) if page_name in TASK_TYPES else manifest.get('page_imported_at', {}).get(page_name, manifest['imported_at']))
     if page_name in TASK_TYPES and manifest.get('work_order_source'):
-        st.caption('Work-order source: Anas - All Work Orders.xlsx · Assigned Resource supplies technician. Scheduled, In Progress and Unscheduled are open; Completed is completed; Canceled is separate. This source has no verified due date, so overdue charts are skipped.')
+        st.caption('Work-order source: '+str(manifest.get('work_order_source',{}).get('name','Anas - All Work Orders.xlsx'))+' · Assigned Resource supplies technician. Scheduled, In Progress and Unscheduled are open; Completed is completed; Canceled is separate. This source has no verified due date, so overdue charts are skipped.')
     tables = [t for t in PAGE_TABLES.get(page_name, []) if t in manifest["tables"]]
     if not tables:
         st.warning("The source tables for this page are unavailable. Charts have been skipped.")
