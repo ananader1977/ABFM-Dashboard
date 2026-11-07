@@ -99,10 +99,12 @@ def status_style(label, percentage=None):
     return INK, '500', 'normal'
 
 
-def styled_metric(container, label, value, percentage=None, key='value'):
-    _, _, tone = status_style(label, percentage)
+def styled_metric(container, label, value, percentage=None, key='value', share_label=None):
+    color, weight, tone = status_style(label, percentage)
     with container.container(key='metric_status_' + tone + '_' + re.sub(r'[^a-zA-Z0-9_]', '_', str(key))):
         st.metric(label, value)
+        if share_label is not None:
+            st.markdown(f'<div data-status-share="{html.escape(label,quote=True)}" style="color:{color};font-weight:{weight};font-size:.8rem;margin:0 0 .5rem">{html.escape(share_label)}</div>',unsafe_allow_html=True)
 
 
 def page_header(name, imported_at):
