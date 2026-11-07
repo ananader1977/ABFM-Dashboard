@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import re
 import smtplib
+import socket
+from contextlib import contextmanager
 import sqlite3
 import ssl
 import threading
@@ -221,28 +223,86 @@ def build_email(group,sender,source_date,test_to=None):
 
 
 def smtp_settings(config):
-    return {name:os.environ.get('ABFM_SMTP_'+name.upper(),config.get('smtp',{}).get(name,'')) for name in ['host','port','username','password','sender']}
+    settings = {name:os.environ.get('ABFM_SMTP_'+name.upper()) or config.get('smtp',{}).get(name,'') for name in ['host','port','username','password','sender']}
+    for field in ['host','port','username','sender']:
+        settings[field]=str(settings[field]).strip()
+    if settings['host'].lower()=='smtp.gmail.com':
+        settings['password']=''.join(str(settings['password']).split())
+    return settings
+
+
+def sender_status(config):
+    smtp=smtp_settings(config)
+    return {'sender':email(smtp['sender']),'host':smtp['host'],'port':smtp['port'] or '587',
+            'password_saved':bool(smtp['password']),
+            'missing':[k for k in ['host','username','password','sender'] if not smtp[k]]}
+
+
+def validate_sender(config):
+    settings=smtp_settings(config)
+    missing=sender_status(config)['missing']
+    if missing:raise ValueError('Email settings are incomplete: '+', '.join(missing)+'. Enter the Gmail app password and use Save settings or a send button.')
+    if not email(settings['sender']):raise ValueError('Enter a valid sender email address.')
+    if str(settings['port'] or '587') not in {'465','587'}:raise ValueError('Use encrypted SMTP port 465 or 587.')
+    return settings
+
+
+@contextmanager
+def smtp_connection(config):
+    settings=validate_sender(config)
+    port=int(settings['port'] or 587)
+    client=smtplib.SMTP_SSL(settings['host'],port,timeout=12,context=ssl.create_default_context()) if port==465 else smtplib.SMTP(settings['host'],port,timeout=12)
+    with client:
+        if port!=465:client.starttls(context=ssl.create_default_context())
+        client.login(settings['username'],settings['password'])
+        yield client
+
+
+def email_error(exc):
+    if isinstance(exc,smtplib.SMTPAuthenticationError):
+        return 'Gmail rejected authentication. Use a Gmail app password for the selected sender, not the normal account password. Save the settings and check the connection again.'
+    if isinstance(exc,smtplib.SMTPRecipientsRefused):return 'The email server rejected one or more recipients. Check the displayed To and CC addresses.'
+    if isinstance(exc,smtplib.SMTPException):return 'The email server rejected the request. Check sender permissions and sending limits.'
+    if isinstance(exc,(TimeoutError,socket.timeout,ConnectionError,OSError)):
+        return 'The SMTP connection failed or timed out. Check the host and TLS port; try 465 if 587 cannot connect. No automatic resend will be attempted.'
+    if isinstance(exc,ValueError):return str(exc)
+    return 'Email delivery failed ('+type(exc).__name__+'). Check the saved email settings.'
+
+
+def check_connection(config):
+    try:
+        with smtp_connection(config):pass
+    except Exception as exc:
+        LOG.error('Escalation connection check failed: %s',type(exc).__name__)
+        raise ValueError(email_error(exc)) from None
+    return True
+
+
+class DeliveryFailure(ValueError):
+    def __init__(self,accepted,total,reason):
+        self.accepted=accepted;self.total=total
+        super().__init__(f'{accepted} of {total} email(s) accepted by the server. '+reason+(' Some messages were accepted; do not resend the full live batch without checking recipients.' if accepted else ''))
 
 
 def send_groups(groups,config,source_date,test=False):
-    smtp=smtp_settings(config)
-    if not smtp['host'] or not email(smtp['sender']) or not smtp['username'] or not smtp['password']:
-        raise ValueError('Configure an authenticated SMTP sender before sending escalation emails.')
-    if not groups:return 0
+    smtp=validate_sender(config)
+    if not groups:raise ValueError('No routable records are available. Check the recipient preview and unresolved routing rows.')
     test_to=config.get('test_email','')
     if test and not email(test_to):raise ValueError('Set the test recipient email first.')
     if test:
-        # Two test messages: one combined example for each escalation stream.
         groups=[{'kind':kind,'to':test_to,'cc':[], 'records':[row for g in groups if g['kind']==kind for row in g['records']]} for kind in ['Operations','Procurement'] if any(g['kind']==kind for g in groups)]
     messages=[build_email(g,smtp['sender'],source_date.get(g['kind'],'Unknown') if isinstance(source_date,dict) else source_date,test_to if test else None) for g in groups]
-    # Always encrypt transport and require authenticated SMTP.
-    port=int(smtp['port'] or 587)
-    client=smtplib.SMTP_SSL(smtp['host'],port,timeout=30,context=ssl.create_default_context()) if port==465 else smtplib.SMTP(smtp['host'],port,timeout=30)
-    with client:
-        if port!=465:client.starttls(context=ssl.create_default_context())
-        client.login(smtp['username'],smtp['password'])
-        for message in messages:client.send_message(message)
-    return len(messages)
+    accepted=0
+    try:
+        with smtp_connection(config) as client:
+            for message in messages:
+                refused=client.send_message(message)
+                if refused:raise ValueError('The server refused one or more recipients; review delivery before retrying.')
+                accepted+=1
+    except Exception as exc:
+        LOG.error('Escalation delivery failed after %s of %s messages: %s',accepted,len(messages),type(exc).__name__)
+        raise DeliveryFailure(accepted,len(messages),email_error(exc)) from None
+    return accepted
 
 
 def source_dates(manifest):
@@ -310,13 +370,14 @@ def review_cards(directory,manifest):
         navigate(kind,'wo_open','Reactive')
     for offset in range(0,len(rows),4):
         for col,row in zip(st.columns(4),rows[offset:offset+4]):
-            with col,st.container(border=True):
+            with col,st.container(border=True,key='compact_review_manager_'+hashlib.sha256(row['name'].encode()).hexdigest()[:12]):
                 st.markdown('**'+row['name']+'**')
                 pct=100*row['open']/row['total'] if row['total'] else 0
                 styled_metric(st, 'Open Reactive / Corrective / Pro-active', f"{row['open']:,}", percentage=pct, key='manager_'+hashlib.sha256(row['name'].encode()).hexdigest()[:12])
                 st.caption(' · '.join(f'{k}: {row[k]:,}' for k in ['Reactive','Corrective','Pro-active']))
-                for kind in ['Reactive','Corrective','Pro-active']:
-                    if row[kind]:st.button(f'View {kind} ({row[kind]:,})',key='manager_'+row['name']+'_'+kind,on_click=open_manager,args=(row['name'],kind,row['aliases'][kind]))
+                with st.popover('View open records',width='stretch',key='manager_menu_'+hashlib.sha256(row['name'].encode()).hexdigest()[:12]):
+                    for kind in ['Reactive','Corrective','Pro-active']:
+                        if row[kind]:st.button(f'View {kind} ({row[kind]:,})',key='manager_'+row['name']+'_'+kind,on_click=open_manager,args=(row['name'],kind,row['aliases'][kind]))
                 pct=100*row['open']/row['total'] if row['total'] else 0
                 color, weight, _ = status_style('Open',pct)
                 st.markdown(f'<span style="color:{color};font-weight:{weight}">{pct:.2f}%</span> of {row["total"]:,} work orders',unsafe_allow_html=True)
@@ -326,7 +387,7 @@ def review_cards(directory,manifest):
         counts=rfqs[ASSIGNEE].fillna('(Not assigned)').value_counts()
         for offset in range(0,len(counts),4):
             for col,(name,count) in zip(st.columns(4),list(counts.items())[offset:offset+4]):
-                with col,st.container(border=True):
+                with col,st.container(border=True,key='compact_review_staff_'+hashlib.sha256(str(name).encode()).hexdigest()[:12]):
                     pct=100*count/len(rfqs)
                     styled_metric(st, 'Open RFQs · '+str(name), f'{count:,}', percentage=pct, key='rfq_staff_'+hashlib.sha256(str(name).encode()).hexdigest()[:12])
                     from executive import navigate
@@ -375,6 +436,8 @@ def admin_panel(root):
                 config[section]=rows
             save_config(root,config);st.success('Recipient corrections saved. Reopen this page to refresh the routing preview.')
     smtp=config.get('smtp',{})
+    status_slot=st.empty()
+    missing_slot=st.empty()
     with st.form('escalation_smtp'):
         host=st.text_input('SMTP host',value=smtp.get('host',''))
         port=st.text_input('SMTP TLS port',value=str(smtp.get('port','587')))
@@ -383,23 +446,34 @@ def admin_panel(root):
         password=st.text_input('SMTP password / app password (blank keeps existing)',type='password')
         test_email=st.text_input('Test recipient email (tests go only here)',value=config.get('test_email',''))
         enabled=st.checkbox('Enable daily 8 AM escalations',value=config.get('enabled',False))
-        if st.form_submit_button('Save email settings'):
-            candidate=dict(config,smtp={'host':host.strip(),'port':port.strip(),'sender':email(sender),'username':username.strip(),'password':password or smtp.get('password','')},test_email=email(test_email),enabled=enabled)
-            ready=smtp_settings(candidate)
-            if enabled and (not groups or any(not ready[k] for k in ['host','username','password','sender'])):
-                st.error('Daily sending was not enabled. Resolve recipient routing and configure the authenticated SMTP sender first.')
-            elif port not in {'465','587'}:
-                st.error('Use encrypted SMTP port 465 or 587.')
-            else:save_config(root,candidate);config=candidate;st.success('Email settings saved. Daily time: 08:00 Dubai.')
-    if st.button('Send test escalation to test recipient only'):
+        save_clicked=st.form_submit_button('Save email settings')
+        check_clicked=st.form_submit_button('Save & check email connection')
+        test_clicked=st.form_submit_button('Send test escalation to test recipient only')
+        live_clicked=st.form_submit_button('Send live escalation emails now')
+    if any([save_clicked,check_clicked,test_clicked,live_clicked]):
+        candidate=dict(config,smtp={'host':host.strip(),'port':port.strip(),'sender':email(sender),'username':username.strip(),'password':password or smtp.get('password','')},test_email=email(test_email),enabled=enabled)
         try:
-            count=send_groups(groups,config,source_dates(manifest),test=True)
-            st.success(f'{count} test email(s) sent to the test recipient only. No production CC recipients were used.')
-        except Exception as exc:st.error(str(exc))
-    if st.button('Send live escalation emails now'):
-        try:
-            count=send_groups(groups,config,source_dates(manifest))
-            st.success(f'{count} escalation email(s) accepted by the SMTP server.')
-        except Exception as exc:st.error(str(exc))
+            if port not in {'465','587'}:raise ValueError('Use encrypted SMTP port 465 or 587.')
+            if enabled or check_clicked or test_clicked or live_clicked:validate_sender(candidate)
+            if enabled and not groups:raise ValueError('No routable records are configured; daily sending was not enabled.')
+            if enabled:
+                with st.spinner('Validating sender before enabling daily emails…'):
+                    check_connection(candidate)
+            save_config(root,candidate);config=candidate
+            if check_clicked:
+                with st.spinner('Checking encrypted connection and Gmail authentication…'):
+                    check_connection(config)
+                st.success('Connection and authentication succeeded. No email was sent.')
+            elif test_clicked or live_clicked:
+                with st.spinner('Sending test emails…' if test_clicked else 'Sending the scoped escalation batch…'):
+                    count=send_groups(groups,config,source_dates(manifest),test=test_clicked)
+                st.success(f'{count} test email(s) accepted for the test recipient only; production CC recipients were not used.' if test_clicked else f'{count} live escalation email(s) accepted by the server.')
+            else:st.success('Email settings saved. Daily time: 08:00 Dubai.')
+        except Exception as exc:
+            LOG.error('Manual escalation action failed: %s',type(exc).__name__)
+            st.error(email_error(exc))
+    status=sender_status(config)
+    status_slot.caption('Saved sender: '+(status['sender'] or 'not configured')+' · Password saved: '+('Yes' if status['password_saved'] else 'No')+' · Daily schedule: '+('Enabled' if config.get('enabled') else 'Disabled'))
+    if status['missing']:missing_slot.info('Complete the sender settings below. Test and live buttons save the form before sending. Missing: '+', '.join(status['missing']))
     report=Path(root)/'escalation_last_run.json'
     if report.exists():st.json(json.loads(report.read_text()))
