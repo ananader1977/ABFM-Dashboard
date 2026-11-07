@@ -16,7 +16,7 @@ html,body,.stApp,input,button,textarea,select{font-family:Calibri,Arial,sans-ser
 :root{--ink:#122843;--gold:#b3955b;--paper:#f7f5f0}
 .stApp{background:linear-gradient(145deg,#faf9f6 0%,#f1eee7 100%);color:var(--ink)}
 [data-testid="stHeader"]{background:rgba(250,249,246,.94)}
-.block-container{max-width:1600px;padding-top:2.2rem;padding-bottom:3rem}
+.block-container{max-width:1600px;padding-top:4.5rem;padding-left:1.5rem;padding-right:1.5rem;padding-bottom:3rem}
 h1,h2,h3{color:var(--ink);letter-spacing:-.025em}
 h1,h2{font-family:Calibri,Arial,sans-serif!important;font-weight:500!important}
 [data-testid="stSidebar"]{background:linear-gradient(170deg,#142c49,#0b1b30);border-right:1px solid #b3955b66}
@@ -64,6 +64,25 @@ h1,h2{font-family:Calibri,Arial,sans-serif!important;font-weight:500!important}
 [class*="st-key-task_links_"] .stButton button{font-size:.72rem;min-height:26px;padding:0;color:#122843;text-decoration:underline;white-space:nowrap}
 [class*="st-key-task_links_"] .stButton button p{font-size:.72rem;white-space:nowrap}
 [class*="st-key-task_links_"] .stButton button:hover{color:#9b804a}
+/* Keep the navigation and dashboard in separate layout tracks at every width. */
+[data-testid="stAppViewContainer"] > div:has(> [data-testid="stMain"]){position:relative!important;flex:1 1 0%!important;min-width:0!important;width:0!important}
+[data-testid="stMain"]{min-width:0!important;width:100%!important}
+[data-testid="stSidebar"][data-collapsed="false"]{width:280px!important;min-width:280px!important;max-width:280px!important;flex:0 0 280px!important}
+[data-testid="stSidebarResizeHandle"]{display:none}
+[data-testid="stSidebarCollapseButton"]{visibility:visible!important}
+[data-testid="stSidebar"] [data-testid="stLinkButton"] a{background:transparent;color:#f2e8d3;border-color:#b3955b77}
+[data-testid="stSidebar"] [data-testid="stLinkButton"] a:hover{background:#b3955b24;color:#fffefa}
+@media(max-width:900px){
+ [data-testid="stAppViewContainer"]{flex-direction:column!important;overflow:hidden!important}
+ [data-testid="stSidebar"][data-collapsed="true"]{display:none!important}
+ [data-testid="stSidebar"][data-collapsed="false"]{position:relative!important;transform:none!important;width:100%!important;min-width:0!important;max-width:100%!important;height:auto!important;max-height:45dvh!important;flex:0 0 auto!important;box-shadow:none!important}
+ [data-testid="stSidebarContent"]{height:auto!important;max-height:45dvh;overflow-y:auto!important}
+ [data-testid="stSidebar"] .brand{padding:4px 0 12px;margin-bottom:10px}
+ [data-testid="stSidebar"] .brand img{max-width:150px}
+ [data-testid="stAppViewContainer"] > div:has(> [data-testid="stMain"]){width:100%!important;height:auto!important;min-height:0!important;flex:1 1 0%!important}
+ [data-testid="stMain"]{position:relative!important;height:100%!important;min-height:0!important}
+ .block-container{padding-top:4.5rem!important;padding-left:1rem!important;padding-right:1rem!important}
+}
 </style>''' 
 
 
