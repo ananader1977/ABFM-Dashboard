@@ -185,7 +185,7 @@ def unique_lookup(rows, field, value, required):
     return row,''
 
 
-def routes(tasks, rfqs, config):
+def routes(tasks, rfqs, config, expired_contracts=None):
     groups={};issues=[]
     for _,row in tasks.iterrows():
         manager=text(row.get(MANAGER))
@@ -208,7 +208,47 @@ def routes(tasks, rfqs, config):
                            'Issue':error or ops_error or 'Procurement manager is missing or ambiguous'});continue
         cc=tuple(sorted({ops['operations_email'],ops['director'],ops['coo'],next(iter(managers))}))
         group=groups.setdefault(('Procurement',dest['email'],cc),[]);group.append(row.to_dict())
-    return [{'kind':kind,'to':to,'cc':list(cc),'records':rows} for (kind,to,cc),rows in groups.items()],issues
+    result=[{'kind':kind,'to':to,'cc':list(cc),'records':rows} for (kind,to,cc),rows in groups.items()]
+    if expired_contracts:
+        ovini=next((g for g in result if g['kind']=='Procurement' and any(key(row.get(ASSIGNEE))=='ovini' for row in g['records'])),None)
+        if ovini is None:
+            dest,error=unique_lookup(staff,'assignee','Ovini',['email','procurement_manager','operations_email','director','coo'])
+            if dest:
+                ovini={'kind':'Procurement','to':dest['email'],'cc':sorted({dest[c] for c in ['procurement_manager','operations_email','director','coo']}),'records':[]}
+                result.append(ovini)
+            else:issues.append({'Type':'Procurement','Record':'Expired subcontractor agreements','Responsible':'Ovini','Issue':error})
+        if ovini is not None:ovini['expired_contracts']=expired_contracts
+    return result,issues
+
+
+def expired_agreements(directory,manifest):
+    from analytics import dates,today
+    info=manifest.get('tables',{}).get('Subcontractor AMC')
+    if not info:return []
+    frames=[]
+    for frame in scan(directory,manifest,'Subcontractor AMC',info['columns']):
+        if 'End Date ' not in frame:continue
+        end=dates(frame['End Date ']);part=frame.loc[end.lt(today())].copy()
+        if len(part):
+            part['Days expired']=(today()-end.loc[part.index].dt.normalize()).dt.days
+            frames.append(part)
+    return pd.concat(frames,ignore_index=True).to_dict('records') if frames else []
+
+
+def email_summary(kind,frame):
+    """Only summarize records already authorized for this recipient group."""
+    def names(column):
+        values=frame[column] if column in frame else pd.Series('(Not assigned)',index=frame.index)
+        return values.map(lambda value: display_name(text(value)) or '(Not assigned)')
+    if kind=='Operations':
+        work=frame.copy();work['Manager']=names(MANAGER).map(lambda v:'Rafik Jabbour' if key(v).lstrip('#').strip()=='rafik jabbour' else v)
+        if 'Work Order Type' not in work:work['Work Order Type']='Other'
+        summary=pd.crosstab(work['Manager'],work['Work Order Type']).reindex(columns=['Reactive','PPM','Corrective','Pro-active'],fill_value=0)
+        summary['Total open']=summary.sum(axis=1);summary=summary.sort_values('Total open',ascending=False).reset_index()
+    else:
+        work=pd.DataFrame({'Procurement staff':names(ASSIGNEE),'Operations manager':names('Approved by (Operation)')})
+        summary=work.groupby(['Procurement staff','Operations manager'],dropna=False).size().reset_index(name='Open RFQs').sort_values('Open RFQs',ascending=False)
+    return summary
 
 
 def build_email(group,sender,source_date,test_to=None):
@@ -217,19 +257,27 @@ def build_email(group,sender,source_date,test_to=None):
     sent_at=datetime.now(TZ).replace(microsecond=0);deadline=sent_at+timedelta(hours=24)
     msg=EmailMessage();msg['From']=sender;msg['To']=test_to or group['to'];msg['Date']=format_datetime(sent_at)
     if not test_to:msg['Cc']=', '.join(group['cc'])
-    msg['Subject']=('[TEST] ' if test_to else '')+f"ABFM {group['kind']} escalation · {len(group['records'])} open records · {sent_at:%d %b %Y}"
+    record_label='open records' if group['kind']=='Operations' else 'open RFQs'
+    contract_subject=f" · {len(group['expired_contracts'])} expired agreements" if group.get('expired_contracts') else ''
+    msg['Subject']=('[TEST] ' if test_to else '')+f"ABFM {group['kind']} escalation · {len(group['records'])} {record_label}{contract_subject} · {sent_at:%d %b %Y}"
     columns=['WO No.','Work Order Type','Priority','System Status','Created On','Age (days)','Service Account','Building',MANAGER] if group['kind']=='Operations' else ['Reference Number','Status','Priority:','Quotation Request Date:','Project Details:','Approved by (Operation)',ASSIGNEE]
-    full=pd.DataFrame(group['records']);frame=full[[c for c in columns if c in full]]
-    intro=('Please address the attached open P1/P2 tasks opened more than seven days ago.' if group['kind']=='Operations' else 'Please address the attached open RFQs and confirm the quotation status.')
+    full=pd.DataFrame(group['records']) if group['records'] else pd.DataFrame(columns=columns);frame=full[[c for c in columns if c in full]]
+    summary=email_summary(group['kind'],full)
+    expired=group.get('expired_contracts',[])
+    extra=f'{len(expired):,} expired subcontractor agreements assigned to Ovini are listed in a separate Excel attachment. Please confirm renewal or the recovery plan within the same deadline.' if expired else ''
+    intro=('Please address the attached open P1/P2 tasks opened more than seven days ago.' if group['kind']=='Operations' else 'Please address the attached procurement items and confirm the quotation or contract-renewal status.')
     action='Within 24 hours of this email, confirm closure or provide the responsible owner, action plan and expected completion date. If blocked, reply by the deadline with the blocker and recovery plan.'
     due=f"Response due: {deadline:%d %b %Y, %H:%M} Dubai (UTC+4). Email date: {sent_at:%d %b %Y, %H:%M} Dubai (UTC+4)."
     note=f"Source snapshot: {source_date}. Imported snapshot; closure and new-work updates require a new import."
-    msg.set_content('\n\n'.join([intro,action,due,f"{len(full):,} records. Excel contains the complete source data; the PDF provides an action register.",note]))
-    msg.add_alternative('<div style="font-family:Arial;color:#122843;background:#fffefa;padding:24px;border-top:4px solid #b3955b"><h2>AL BONIAN FM | '+html.escape(group['kind'])+' escalation</h2><p>'+html.escape(intro)+'</p><p>'+html.escape(action)+'</p><p><strong>'+html.escape(due)+'</strong></p><p>'+str(len(full))+' records. Please review the attached Excel data and PDF action register.</p><p style="font-size:12px">'+html.escape(note)+'</p></div>',subtype='html')
+    msg.set_content('\n\n'.join([intro,action,due,summary.to_string(index=False),extra,f"{len(full):,} records. Excel contains the complete source data; the PDF provides an action register.",note]))
+    msg.add_alternative('<div style="font-family:Calibri,Arial,sans-serif;color:#122843;background:#fffefa;padding:24px;border-top:4px solid #b3955b"><h2>AL BONIAN FM | '+html.escape(group['kind'])+' escalation</h2><p>'+html.escape(intro)+'</p><p>'+html.escape(action)+'</p><p><strong>'+html.escape(due)+'</strong></p><h3>Open task breakdown</h3>'+summary.to_html(index=False,escape=True,border=0).replace('<table ', '<table style="border-collapse:collapse;width:100%;text-align:left" cellpadding="8" ').replace('<th>', '<th style="background:#122843;color:#fffefa;border-bottom:2px solid #b3955b">').replace('<td>', '<td style="border-bottom:1px solid #ddd5c5">')+('<p>'+html.escape(extra)+'</p>' if extra else '')+'<p>'+str(len(full))+' records. Please review the attached Excel data and PDF action register.</p><p style="font-size:12px">'+html.escape(note)+'</p></div>',subtype='html')
     full=full.copy();full['Email sent (Dubai)']=sent_at.isoformat();full['Response due (Dubai)']=deadline.isoformat()
     stem=f"ABFM_{group['kind']}_Escalation_{sent_at:%Y%m%d}"
     msg.add_attachment(excel_bytes(list(full.columns),full.itertuples(index=False,name=None)),maintype='application',subtype='vnd.openxmlformats-officedocument.spreadsheetml.sheet',filename=stem+'.xlsx')
     msg.add_attachment(pdf_bytes(group['kind'],frame,sent_at,deadline,source_date),maintype='application',subtype='pdf',filename=stem+'.pdf')
+    if expired:
+        contracts=pd.DataFrame(expired);contracts['Email sent (Dubai)']=sent_at.isoformat();contracts['Response due (Dubai)']=deadline.isoformat()
+        msg.add_attachment(excel_bytes(list(contracts.columns),contracts.itertuples(index=False,name=None)),maintype='application',subtype='vnd.openxmlformats-officedocument.spreadsheetml.sheet',filename=f'ABFM_Ovini_Expired_Contracts_{sent_at:%Y%m%d}.xlsx')
     return msg
 
 
@@ -331,7 +379,7 @@ def send_groups(groups,config,source_date,test=False):
     test_to=config.get('test_email','')
     if test and not email(test_to):raise ValueError('Set the test recipient email first.')
     if test:
-        groups=[{'kind':kind,'to':test_to,'cc':[], 'records':[row for g in groups if g['kind']==kind for row in g['records']]} for kind in ['Operations','Procurement'] if any(g['kind']==kind for g in groups)]
+        groups=[{'kind':kind,'to':test_to,'cc':[], 'records':[row for g in groups if g['kind']==kind for row in g['records']], 'expired_contracts':[row for g in groups if g['kind']==kind for row in g.get('expired_contracts',[])]} for kind in ['Operations','Procurement'] if any(g['kind']==kind for g in groups)]
     messages=[build_email(g,smtp['sender'],source_date.get(g['kind'],'Unknown') if isinstance(source_date,dict) else source_date,test_to if test else None) for g in groups]
     accepted=0
     try:
@@ -358,7 +406,7 @@ def run_daily(root,now=None):
     if now.hour!=8:return
     directory,manifest=snapshot(root)
     tasks=priority_tasks(directory,manifest,now);rfqs=open_rfqs(directory,manifest)
-    groups,issues=routes(tasks,rfqs,config)
+    groups,issues=routes(tasks,rfqs,config,expired_agreements(directory,manifest))
     smtp=smtp_settings(config)
     ledger=sqlite3.connect(Path(root)/'escalation_delivery.sqlite',timeout=20)
     ledger.execute('CREATE TABLE IF NOT EXISTS deliveries (id TEXT PRIMARY KEY,status TEXT,created TEXT)')
@@ -432,10 +480,10 @@ def review_cards(directory,manifest):
                 st.markdown('**'+display_name(row['name'])+'**')
                 pct=100*row['open']/row['total'] if row['total'] else 0
                 styled_metric(st, 'Open Reactive / Corrective / Pro-active', f"{row['open']:,}", percentage=pct, key='manager_'+hashlib.sha256(row['name'].encode()).hexdigest()[:12])
-                st.caption(' · '.join(f'{k}: {row[k]:,}' for k in ['Reactive','Corrective','Pro-active']))
-                with st.popover('View open records',width='stretch',key='manager_menu_'+hashlib.sha256(row['name'].encode()).hexdigest()[:12]):
-                    for kind in ['Reactive','Corrective','Pro-active']:
-                        if row[kind]:st.button(f'View {kind} ({row[kind]:,})',key='manager_'+row['name']+'_'+kind,on_click=open_manager,args=(row['name'],kind,row['aliases'][kind]))
+                with st.container(key='task_links_'+hashlib.sha256(row['name'].encode()).hexdigest()[:12]):
+                    for link,kind in zip(st.columns([1,1,1.15],gap='small'),['Reactive','Corrective','Pro-active']):
+                        with link:
+                            st.button(f'{kind}: {row[kind]:,}',key='manager_'+row['name']+'_'+kind,type='tertiary',disabled=not row[kind],on_click=open_manager,args=(row['name'],kind,row['aliases'][kind]))
                 pct=100*row['open']/row['total'] if row['total'] else 0
                 color, weight, _ = status_style('Open',pct)
                 st.markdown(f'<span style="color:{color};font-weight:{weight}">{pct:.2f}%</span> of {row["total"]:,} work orders',unsafe_allow_html=True)
@@ -485,9 +533,9 @@ def admin_panel(root):
             except (ValueError,TypeError,KeyError) as exc:st.error(str(exc))
     directory,manifest=snapshot(root)
     tasks=priority_tasks(directory,manifest);rfqs=open_rfqs(directory,manifest)
-    groups,issues=routes(tasks,rfqs,config)
+    groups,issues=routes(tasks,rfqs,config,expired_agreements(directory,manifest))
     st.caption('Daily schedule: 08:00 Asia/Dubai. Separate operations and procurement escalation messages are grouped by To and CC so unrelated contract records are not shared. Every live message includes its Director and COO.')
-    st.dataframe(pd.DataFrame([{'Email type':g['kind'],'To':g['to'],'CC':', '.join(g['cc']),'Records':len(g['records'])} for g in groups]),hide_index=True,width='stretch')
+    st.dataframe(pd.DataFrame([{'Email type':g['kind'],'To':g['to'],'CC':', '.join(g['cc']),'Records':len(g['records']),'Expired agreements':len(g.get('expired_contracts',[]))} for g in groups]),hide_index=True,width='stretch')
     if issues:
         st.warning(f'{len(issues):,} records have missing or conflicting routing and will not be emailed until corrected.')
         st.dataframe(pd.DataFrame(issues),hide_index=True,width='stretch')
