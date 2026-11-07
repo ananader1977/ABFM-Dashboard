@@ -24,7 +24,7 @@ from executive import PAGE as EXECUTIVE_PAGE, render as executive_summary, scope
 ROOT = Path(os.environ.get("ABFM_DATA_DIR", Path(__file__).parent / "data"))
 PAGE_LABELS = {"MR tracker": "MR Tracker", "SubContractors Agrements": "Subcontractors Agreement"}
 REMOVED_PAGES = {"Asset Details", "KPI & MR", "Quotations", "Cheque Request", "Cheque Requests", "QHSE", "Manpower", "Manpower Management"}
-st.set_page_config(page_title="Al Bonian FM | Operations Intelligence", page_icon="🏢", layout="wide")
+st.set_page_config(page_title="Al Bonian FM | Operations Intelligence", page_icon="🏢", layout="wide", initial_sidebar_state="collapsed")
 st.markdown(CSS, unsafe_allow_html=True)
 
 
@@ -265,7 +265,7 @@ def run():
         brand()
         st.caption(f"{user['username']} · {user['role']}")
         st.link_button("Download / install mobile app", "/mobile/", use_container_width=True)
-        st.caption("Android · iPhone · iPad")
+        st.caption("Android · iPhone · iPad · Windows")
         st.title("FM Dashboard")
         directory, manifest = snapshot()
         available_pages = [p["name"] for p in manifest["pages"] if p["name"] not in REMOVED_PAGES and p['name'] != EXECUTIVE_PAGE] if manifest else []
