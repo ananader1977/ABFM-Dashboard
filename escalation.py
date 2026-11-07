@@ -15,6 +15,8 @@ import threading
 import time
 from datetime import datetime, timedelta
 from email.message import EmailMessage
+from email.utils import format_datetime
+from mail_reports import display_name
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -152,7 +154,7 @@ def manager_counts(directory,manifest):
         if not set(cols)<=set(frame):continue
         frame=frame.loc[frame['Work Order Type'].isin(['Reactive','Corrective','Pro-active'])].copy()
         frame['_manager_variant']=frame[MANAGER].fillna('(Not assigned)').replace('','(Not assigned)')
-        frame[MANAGER]=frame['_manager_variant'].map(lambda name: 'Rafik Jabbour' if key(name).lstrip('#').strip()=='rafik jabbour' else name)
+        frame[MANAGER]=frame['_manager_variant'].map(lambda name: 'Rafik Jabbour' if key(name).lstrip('#').strip()=='rafik jabbour' else display_name(name))
         for (name,kind),group in frame.groupby([MANAGER,'Work Order Type'],dropna=False):
             aliases.setdefault((name,kind),set()).update(group['_manager_variant'].unique())
             totals[name]=totals.get(name,0)+len(group)
@@ -210,15 +212,24 @@ def routes(tasks, rfqs, config):
 
 
 def build_email(group,sender,source_date,test_to=None):
-    msg=EmailMessage();msg['From']=sender;msg['To']=test_to or group['to']
+    from interactive import excel_bytes
+    from mail_reports import pdf_bytes
+    sent_at=datetime.now(TZ).replace(microsecond=0);deadline=sent_at+timedelta(hours=24)
+    msg=EmailMessage();msg['From']=sender;msg['To']=test_to or group['to'];msg['Date']=format_datetime(sent_at)
     if not test_to:msg['Cc']=', '.join(group['cc'])
-    msg['Subject']=('[TEST] ' if test_to else '')+f"ABFM {group['kind']} escalation · {len(group['records'])} open records · {datetime.now(TZ):%d %b %Y}"
+    msg['Subject']=('[TEST] ' if test_to else '')+f"ABFM {group['kind']} escalation · {len(group['records'])} open records · {sent_at:%d %b %Y}"
     columns=['WO No.','Work Order Type','Priority','System Status','Created On','Age (days)','Service Account','Building',MANAGER] if group['kind']=='Operations' else ['Reference Number','Status','Priority:','Quotation Request Date:','Project Details:','Approved by (Operation)',ASSIGNEE]
-    frame=pd.DataFrame(group['records']);cols=[c for c in columns if c in frame];frame=frame[cols]
-    note=f"Source snapshot: {source_date}. This is an imported snapshot; closure and new-work updates require a new import."
-    intro='Review the open P1/P2 tasks opened more than seven days ago and provide the action plan and expected closure date.' if group['kind']=='Operations' else 'Review the open RFQs and provide the quotation status and expected completion date.'
-    msg.set_content(intro+'\n\n'+note+'\n\n'+frame.to_string(index=False))
-    msg.add_alternative('<p>'+html.escape(intro)+'</p><p>'+html.escape(note)+'</p>'+frame.to_html(index=False,escape=True),subtype='html')
+    full=pd.DataFrame(group['records']);frame=full[[c for c in columns if c in full]]
+    intro=('Please address the attached open P1/P2 tasks opened more than seven days ago.' if group['kind']=='Operations' else 'Please address the attached open RFQs and confirm the quotation status.')
+    action='Within 24 hours of this email, confirm closure or provide the responsible owner, action plan and expected completion date. If blocked, reply by the deadline with the blocker and recovery plan.'
+    due=f"Response due: {deadline:%d %b %Y, %H:%M} Dubai (UTC+4). Email date: {sent_at:%d %b %Y, %H:%M} Dubai (UTC+4)."
+    note=f"Source snapshot: {source_date}. Imported snapshot; closure and new-work updates require a new import."
+    msg.set_content('\n\n'.join([intro,action,due,f"{len(full):,} records. Excel contains the complete source data; the PDF provides an action register.",note]))
+    msg.add_alternative('<div style="font-family:Arial;color:#122843;background:#fffefa;padding:24px;border-top:4px solid #b3955b"><h2>AL BONIAN FM | '+html.escape(group['kind'])+' escalation</h2><p>'+html.escape(intro)+'</p><p>'+html.escape(action)+'</p><p><strong>'+html.escape(due)+'</strong></p><p>'+str(len(full))+' records. Please review the attached Excel data and PDF action register.</p><p style="font-size:12px">'+html.escape(note)+'</p></div>',subtype='html')
+    full=full.copy();full['Email sent (Dubai)']=sent_at.isoformat();full['Response due (Dubai)']=deadline.isoformat()
+    stem=f"ABFM_{group['kind']}_Escalation_{sent_at:%Y%m%d}"
+    msg.add_attachment(excel_bytes(list(full.columns),full.itertuples(index=False,name=None)),maintype='application',subtype='vnd.openxmlformats-officedocument.spreadsheetml.sheet',filename=stem+'.xlsx')
+    msg.add_attachment(pdf_bytes(group['kind'],frame,sent_at,deadline,source_date),maintype='application',subtype='pdf',filename=stem+'.pdf')
     return msg
 
 
@@ -392,9 +403,19 @@ def executive_panels(directory,manifest):
     st.subheader('Open P1 / P2 tasks older than seven days')
     st.caption('All four work-order types. Scheduled, In Progress and Unscheduled are open; completed and cancelled tasks are excluded. Age is measured from Created On in Dubai time, strictly greater than seven days.')
     display=tasks.drop(columns=['Status'],errors='ignore')
-    st.dataframe(display,hide_index=True,width='stretch')
+    from mail_reports import DISPLAY_NAMES
+    st.dataframe(display.replace(DISPLAY_NAMES),hide_index=True,width='stretch')
     st.caption(f'{len(tasks):,} matching tasks · snapshot data, recalculated against the current time.')
     st.download_button('Download aged P1/P2 tasks · Excel',data=lambda:excel_bytes(list(display.columns),display.itertuples(index=False,name=None)),file_name='ABFM_Aged_P1_P2.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',on_click='ignore')
+
+
+def agreement_stats(directory,manifest):
+    from analytics import dates, today
+    total=expired=0
+    for frame in scan(directory,manifest,'Subcontractor AMC',['End Date ']):
+        total+=len(frame)
+        if 'End Date ' in frame:expired+=int(dates(frame['End Date ']).lt(today()).sum())
+    return {'total':total,'expired':expired,'percentage':100*expired/total if total else 0}
 
 
 def review_cards(directory,manifest):
@@ -403,12 +424,12 @@ def review_cards(directory,manifest):
     rows=[row for row in manager_counts(directory,manifest) if row['open'] > 0]
     def open_manager(name,kind,variants):
         from executive import navigate
-        st.session_state['quick_'+kind+'_Contract Manager (Contract)'] = ['(Not specified)' if variant=='(Not assigned)' else variant for variant in variants]
+        st.session_state['quick_'+kind+'_Contract Manager (Contract)'] = ['(Not specified)' if variant=='(Not assigned)' else display_name(variant) for variant in variants]
         navigate(kind,'wo_open','Reactive')
     for offset in range(0,len(rows),4):
         for col,row in zip(st.columns(4),rows[offset:offset+4]):
             with col,st.container(border=True,key='compact_review_manager_'+hashlib.sha256(row['name'].encode()).hexdigest()[:12]):
-                st.markdown('**'+row['name']+'**')
+                st.markdown('**'+display_name(row['name'])+'**')
                 pct=100*row['open']/row['total'] if row['total'] else 0
                 styled_metric(st, 'Open Reactive / Corrective / Pro-active', f"{row['open']:,}", percentage=pct, key='manager_'+hashlib.sha256(row['name'].encode()).hexdigest()[:12])
                 st.caption(' · '.join(f'{k}: {row[k]:,}' for k in ['Reactive','Corrective','Pro-active']))
@@ -420,17 +441,26 @@ def review_cards(directory,manifest):
                 st.markdown(f'<span style="color:{color};font-weight:{weight}">{pct:.2f}%</span> of {row["total"]:,} work orders',unsafe_allow_html=True)
     rfqs=open_rfqs(directory,manifest)
     st.markdown('**Open RFQs by procurement staff**')
-    if len(rfqs):
+    stats=agreement_stats(directory,manifest)
+    if len(rfqs) or stats['total']:
         counts=rfqs[ASSIGNEE].fillna('(Not assigned)').value_counts()
+        if stats['total'] and not any('ovini' in key(n) for n in counts.index):counts.loc['Ovini']=0
         for offset in range(0,len(counts),4):
             for col,(name,count) in zip(st.columns(4),list(counts.items())[offset:offset+4]):
                 with col,st.container(border=True,key='compact_review_staff_'+hashlib.sha256(str(name).encode()).hexdigest()[:12]):
-                    pct=100*count/len(rfqs)
+                    pct=100*count/len(rfqs) if len(rfqs) else 0
                     styled_metric(st, 'Open RFQs · '+str(name), f'{count:,}', percentage=pct, key='rfq_staff_'+hashlib.sha256(str(name).encode()).hexdigest()[:12])
                     from executive import navigate
                     st.button('View open RFQs',key='rfq_staff_'+str(name),on_click=navigate,args=('RFQ',{'kind':'rfq_assignee','name':str(name)},'RFQ'))
                     color, weight, _ = status_style('Open',pct)
                     st.markdown(f'<span style="color:{color};font-weight:{weight}">{pct:.2f}%</span> of {len(rfqs):,} open RFQs',unsafe_allow_html=True)
+                    if 'ovini' in key(name):
+                        st.markdown(f"**All subcontractor agreements: {stats['total']:,}**")
+                        styled_metric(st,'Expired agreements',f"{stats['expired']:,} ({stats['percentage']:.2f}%)",percentage=stats['percentage'],key='ovini_expired')
+                        st.caption(f"Not expired: {stats['total']-stats['expired']:,}")
+                        st.caption('Expired % of all agreements · vendor agreement End Date before today (Dubai).')
+                        st.button('View expired agreements',key='ovini_expired_view',on_click=navigate,args=('SubContractors Agrements','agreements_expired','Subcontractor AMC'))
+
     else:st.info('No open RFQs in this snapshot.')
 
 
