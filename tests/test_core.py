@@ -7,6 +7,21 @@ from security import authenticate, connect, current_user, password_hash, save_us
 
 
 class BusinessRules(unittest.TestCase):
+    def test_rfq_open_share_excludes_both_cancellation_spellings(self):
+        from visuals import status_style
+        label='In progress + Returned % (excl. canceled)'
+        frame=pd.DataFrame({'Status':[' In progress ','Returned','Closed','Canceled','Cancelled']})
+        metrics,_=summarize(frame,'RFQ','RFQ')
+        self.assertEqual(metrics['In progress'],1)
+        self.assertEqual(metrics['Returned'],1)
+        self.assertAlmostEqual(metrics[label],200/3)
+        empty,_=summarize(pd.DataFrame({'Status':['Canceled','Cancelled']}),'RFQ','RFQ')
+        self.assertIsNone(empty[label])
+        for value,tone in [(0,'red'),(89.99,'red'),(90,'lightgreen'),(94.99,'lightgreen'),(95,'lightgreen'),(95.01,'green'),(100,'green')]:
+            self.assertEqual(status_style(label,value)[2],tone)
+        for count_label in ['Past end date','In progress','Returned']:
+            for percentage in [None,0,4,95,100]:
+                self.assertEqual(status_style(count_label,percentage)[2],'red')
     def test_types_and_cancelled_separation(self):
         frame = pd.DataFrame({"Task Type": ["BREAKDOWN"] * 5 + ["PPM"], "Status": ["COMPLETE", "HISTORY", "CANCELLED", "ASSIGNED", "ACTIVE", "COMPLETE"], "Task Due Date": ["2020-01-01"] * 6})
         selected = task_frame(frame, "Reactive")
