@@ -93,6 +93,8 @@ def status_style(label, percentage=None):
         return '#b42318', '700', 'red'
     if label in {'Past end date','In progress','Returned'}:
         return '#b42318', '700', 'red'
+    if re.search(r'\bopen\b',label,flags=re.I) and percentage is not None and percentage<5:
+        return '#16703d', '700', 'green'
     if re.search(r'\b(?:open|expired)\b', label, flags=re.I) and percentage is not None:
         if percentage > 10:
             return '#b42318', '700', 'red'
