@@ -5,6 +5,25 @@ import pandas as pd
 from escalation import priority_mask,routes,build_email,send_groups,MANAGER,ASSIGNEE,email
 
 class EscalationTests(unittest.TestCase):
+ def test_case_number_survives_projected_read_and_excel_attachment(self):
+  from escalation import priority_tasks,TZ
+  from datetime import datetime
+  from io import BytesIO
+  from openpyxl import load_workbook
+  case='Case Number (Case) (Case)'
+  with tempfile.TemporaryDirectory() as directory:
+   frame=pd.DataFrame({'WO No.':['001','002'],case:['CASE-0007',None],'Work Order Type':['Reactive']*2,'Status':['ACTIVE']*2,'Priority':['P1']*2,'Created On':['2026-10-01']*2,MANAGER:['Manager']*2})
+   frame.to_parquet(Path(directory)/'work.parquet',index=False)
+   manifest={'tables':{'Reactive':{'file':'work.parquet','columns':list(frame.columns)}}}
+   tasks=priority_tasks(Path(directory),manifest,datetime(2026,11,9,8,tzinfo=TZ))
+   groups,_=routes(tasks,pd.DataFrame(),self.config())
+   for test_to in [None,'tester@example.com']:
+    message=build_email(groups[0],'sender@example.com','snapshot',test_to=test_to)
+    attachment=next(a for a in message.iter_attachments() if a.get_filename().endswith('.xlsx'))
+    book=load_workbook(BytesIO(attachment.get_payload(decode=True)),read_only=True,data_only=True)
+    values=list(book.active.values);headers=list(values[0]);index=headers.index(case)
+    self.assertEqual(index,headers.index('WO No.')+1)
+    self.assertEqual(values[1][index],'CASE-0007');self.assertIsNone(values[2][index]);book.close()
  def test_exact_age_priority_and_open_status(self):
   now=pd.Timestamp('2026-11-07 08:00',tz='Asia/Dubai')
   f=pd.DataFrame({'Status':['ACTIVE']*5+['COMPLETE','CANCELLED'],'Priority':['P1 - Emergency','P2 - High','P3','P10','P1','P1','P2'],
