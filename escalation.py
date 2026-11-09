@@ -234,6 +234,10 @@ def routes(tasks, rfqs, config, expired_contracts=None):
     if procurement['records'] or procurement.get('expired_contracts'):groups[('Procurement','all')]=procurement
     result=[]
     for _,group in sorted(groups.items()):
+        if group['kind']=='Operations':
+            group['history_owners']=sorted({display_name(text(p.get('name'))) or '(Not assigned)' for p in operations if email(p.get('director'))==group['director']})
+        else:
+            group['history_owners']=sorted({display_name(text(p.get('assignee'))) or '(Not assigned)' for p in staff if email(p.get('email')) in group['_to']})
         cc=group.pop('_cc');recipients=group.pop('_to')
         # Keep an owning director in To once; do not repeat the address in CC.
         group['to']=', '.join(sorted(recipients));group['cc']=sorted(cc-recipients)
@@ -275,14 +279,11 @@ def email_summary(kind,frame):
 def email_summary_html(summary):
     """Email-safe table with identical header and cell alignment in each column."""
     numeric=[pd.api.types.is_numeric_dtype(summary[c]) for c in summary.columns]
-    text_count=sum(not value for value in numeric)
-    number_count=sum(numeric)
-    text_width=35 if text_count==1 else 40
-    number_width=(100-text_width*text_count)/number_count if number_count else 0
+    weights=[3 if c=='7-day open trend' else (1 if number else 2.2) for c,number in zip(summary.columns,numeric)]
     table=['<table width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;table-layout:fixed;font-family:Calibri,Arial,sans-serif;font-size:14px;line-height:20px;mso-table-lspace:0pt;mso-table-rspace:0pt;"><thead><tr>']
-    for column,is_number in zip(summary.columns,numeric):
+    for column,is_number,weight in zip(summary.columns,numeric,weights):
         align='right' if is_number else 'left'
-        width=number_width if is_number else text_width
+        width=100*weight/sum(weights)
         table.append(f'<th scope="col" align="{align}" valign="middle" width="{width:g}%" bgcolor="#122843" style="width:{width:g}%;text-align:{align};vertical-align:middle;padding:10px 8px;border:1px solid #ddd5c5;border-bottom:2px solid #b3955b;background-color:#122843;color:#fffefa;font-weight:bold;overflow-wrap:break-word;">{html.escape(str(column))}</th>')
     table.append('</tr></thead><tbody>')
     for index,row in enumerate(summary.itertuples(index=False,name=None)):
@@ -291,7 +292,7 @@ def email_summary_html(summary):
         for value,is_number in zip(row,numeric):
             align='right' if is_number else 'left'
             label=f'{int(value):,}' if is_number and pd.notna(value) else ('' if pd.isna(value) else str(value))
-            table.append(f'<td align="{align}" valign="middle" bgcolor="{background}" style="text-align:{align};vertical-align:middle;padding:10px 8px;border:1px solid #ddd5c5;background-color:{background};color:#122843;overflow-wrap:break-word;">{html.escape(label)}</td>')
+            table.append(f'<td align="{align}" valign="middle" bgcolor="{background}" style="text-align:{align};vertical-align:middle;padding:10px 8px;border:1px solid #ddd5c5;background-color:{background};color:#122843;overflow-wrap:break-word;">{html.escape(label).replace(chr(10),"<br/>")}</td>')
         table.append('</tr>')
     if summary.empty:
         table.append(f'<tr><td colspan="{len(summary.columns)}" align="left" style="text-align:left;padding:10px 8px;border:1px solid #ddd5c5;">No open tasks in this email.</td></tr>')
@@ -311,12 +312,15 @@ def build_email(group,sender,source_date,test_to=None):
     columns=['WO No.','Work Order Type','Priority','System Status','Created On','Age (days)','Service Account','Building',MANAGER] if group['kind']=='Operations' else ['Reference Number','Status','Priority:','Quotation Request Date:','Project Details:','Approved by (Operation)',ASSIGNEE]
     full=pd.DataFrame(group['records']) if group['records'] else pd.DataFrame(columns=columns);frame=full[[c for c in columns if c in full]]
     summary=email_summary(group['kind'],full)
+    from task_history import trend_summary,TREND_NOTE
+    summary=trend_summary(summary,group)
     expired=group.get('expired_contracts',[])
     extra=f'{len(expired):,} expired subcontractor agreements assigned to Ovini are listed in a separate Excel attachment. Please confirm renewal or the recovery plan within the same deadline.' if expired else ''
     intro=('Please address the attached open P1/P2 tasks opened more than seven days ago.' if group['kind']=='Operations' else 'Please address the attached procurement items and confirm the quotation or contract-renewal status.')
     action='Within 24 hours of this email, confirm closure or provide the responsible owner, action plan and expected completion date. If blocked, reply by the deadline with the blocker and recovery plan.'
     due=f"Response due: {deadline:%d %b %Y, %H:%M} Dubai (UTC+4). Email date: {sent_at:%d %b %Y, %H:%M} Dubai (UTC+4)."
     note=f"Source snapshot: {source_date}. Imported snapshot; closure and new-work updates require a new import."
+    if group.get('history'):note+=' '+TREND_NOTE
     msg.set_content('\n\n'.join([intro,action,due,summary.to_string(index=False),extra,f"{len(full):,} records. Separate individual Excel files contain the complete source data; one combined PDF contains the summary and action register.",note]))
     msg.add_alternative('<div style="font-family:Calibri,Arial,sans-serif;color:#122843;background:#fffefa;padding:24px;border-top:4px solid #b3955b"><h2>AL BONIAN FM | '+html.escape(group['kind'])+' escalation</h2><p>'+html.escape(intro)+'</p><p>'+html.escape(action)+'</p><p><strong>'+html.escape(due)+'</strong></p><h3>Open task breakdown</h3>'+email_summary_html(summary)+('<p>'+html.escape(extra)+'</p>' if extra else '')+'<p>'+str(len(full))+' records. Please review the separate individual Excel files and combined PDF summary and action register.</p><p style="font-size:12px">'+html.escape(note)+'</p></div>',subtype='html')
     stem=f"ABFM_{group['kind']}_Escalation_{sent_at:%Y%m%d}"
@@ -465,6 +469,12 @@ def run_daily(root,now=None):
     directory,manifest=snapshot(root)
     tasks=priority_tasks(directory,manifest,now);rfqs=open_rfqs(directory,manifest)
     groups,issues=routes(tasks,rfqs,config,expired_agreements(directory,manifest))
+    from task_history import record_daily,attach_history
+    try:
+        record_daily(root,directory,manifest,tasks,rfqs,now)
+        attach_history(groups,root,now)
+    except Exception:
+        LOG.exception('Daily trend history unavailable; escalation delivery will continue without historical figures.')
     smtp=smtp_settings(config)
     ledger=sqlite3.connect(Path(root)/'escalation_delivery.sqlite',timeout=20)
     ledger.execute('CREATE TABLE IF NOT EXISTS deliveries (id TEXT PRIMARY KEY,status TEXT,created TEXT)')
@@ -496,6 +506,10 @@ def start_scheduler(root):
         except Exception as exc:
             LOG.error('Escalation startup sender check: %s',email_error(exc))
         while True:
+            try:
+                from task_history import capture_daily
+                capture_daily(root)
+            except Exception:LOG.exception('Daily trend capture failed; prior observations are retained.')
             try:run_daily(root)
             except Exception:LOG.exception('Escalation scheduler failed; no delivery assumed successful.')
             time.sleep(30)
@@ -505,6 +519,8 @@ def start_scheduler(root):
 def executive_panels(directory,manifest):
     import streamlit as st
     from interactive import excel_bytes
+    from task_history import executive_trend
+    executive_trend(Path(directory).parent)
     tasks=priority_tasks(directory,manifest)
     st.subheader('Open P1 / P2 tasks older than seven days')
     st.caption('All four work-order types. Scheduled, In Progress and Unscheduled are open; completed and cancelled tasks are excluded. Age is measured from Created On in Dubai time, strictly greater than seven days.')
@@ -603,6 +619,8 @@ def admin_panel(root):
     directory,manifest=snapshot(root)
     tasks=priority_tasks(directory,manifest);rfqs=open_rfqs(directory,manifest)
     groups,issues=routes(tasks,rfqs,config,expired_agreements(directory,manifest))
+    from task_history import attach_history
+    attach_history(groups,root)
     st.caption('Daily schedule: 08:00 Asia/Dubai. One operations email per director, CC that director and COO; Rafik remains separate. One procurement email to all verified procurement staff, CC the procurement manager and saved leadership CC addresses. Each email has individual Excel files and one combined PDF. Test sends mirror this grouping and go only to the test recipient.')
     st.dataframe(pd.DataFrame([{'Email type':g['kind'],'To':g['to'],'CC':', '.join(g['cc']),'Individual Excel files':len(g.get('individuals',[])),'Records':len(g['records']),'Expired agreements':len(g.get('expired_contracts',[]))} for g in groups]),hide_index=True,width='stretch')
     if issues:
