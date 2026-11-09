@@ -279,7 +279,7 @@ def email_summary(kind,frame):
 def email_summary_html(summary):
     """Email-safe table with identical header and cell alignment in each column."""
     numeric=[pd.api.types.is_numeric_dtype(summary[c]) for c in summary.columns]
-    weights=[3 if c=='7-day open trend' else (1 if number else 2.2) for c,number in zip(summary.columns,numeric)]
+    weights=[3 if c=='5-day open trend' else (1 if number else 2.2) for c,number in zip(summary.columns,numeric)]
     table=['<table width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;table-layout:fixed;font-family:Calibri,Arial,sans-serif;font-size:14px;line-height:20px;mso-table-lspace:0pt;mso-table-rspace:0pt;"><thead><tr>']
     for column,is_number,weight in zip(summary.columns,numeric,weights):
         align='right' if is_number else 'left'
@@ -309,8 +309,11 @@ def build_email(group,sender,source_date,test_to=None):
     record_label='open records' if group['kind']=='Operations' else 'open RFQs'
     contract_subject=f" · {len(group['expired_contracts'])} expired agreements" if group.get('expired_contracts') else ''
     msg['Subject']=('[TEST] ' if test_to else '')+f"ABFM {group['kind']} escalation · {len(group['records'])} {record_label}{contract_subject} · {sent_at:%d %b %Y}"
-    columns=['WO No.','Work Order Type','Priority','System Status','Created On','Age (days)','Service Account','Building',MANAGER] if group['kind']=='Operations' else ['Reference Number','Status','Priority:','Quotation Request Date:','Project Details:','Approved by (Operation)',ASSIGNEE]
-    full=pd.DataFrame(group['records']) if group['records'] else pd.DataFrame(columns=columns);frame=full[[c for c in columns if c in full]]
+    columns=['Case Number (Case) (Case)','WO No.','Work Order Type','Priority','System Status','Created On','Age (days)','Service Account','Building',MANAGER] if group['kind']=='Operations' else ['Reference Number','Status','Priority:','Quotation Request Date:','Project Details:','Approved by (Operation)',ASSIGNEE]
+    full=pd.DataFrame(group['records']) if group['records'] else pd.DataFrame(columns=columns)
+    if group['kind']=='Operations' and 'Case Number (Case) (Case)' not in full:
+        full['Case Number (Case) (Case)']=None
+    frame=full[[c for c in columns if c in full]]
     summary=email_summary(group['kind'],full)
     from task_history import trend_summary,TREND_NOTE
     summary=trend_summary(summary,group)
