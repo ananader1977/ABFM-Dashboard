@@ -528,7 +528,7 @@ def executive_panels(directory,manifest):
     from task_history import executive_trend
     executive_trend(Path(directory).parent)
     tasks=priority_tasks(directory,manifest)
-    st.subheader('Open P1 / P2 tasks older than seven days')
+    st.subheader(f'Open P1 / P2 tasks older than seven days · {len(tasks):,} open tasks')
     st.caption('All four work-order types. Scheduled, In Progress and Unscheduled are open; completed and cancelled tasks are excluded. Age is measured from Created On in Dubai time, strictly greater than seven days.')
     display=tasks.drop(columns=['Status'],errors='ignore')
     from mail_reports import DISPLAY_NAMES
