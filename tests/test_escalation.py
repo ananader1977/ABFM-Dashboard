@@ -88,6 +88,15 @@ class EscalationTests(unittest.TestCase):
   self.assertEqual(rafik['aliases']['Reactive'],['# Rafik Jabbour','Rafik Jabbour'])
   self.assertEqual(rows[0]['name'],'Rafik Jabbour');self.assertEqual(rows[-1]['name'],'(Not assigned)')
   self.assertEqual(sum(r['open'] for r in rows),5)
+ def test_manager_counts_include_open_and_completed_ppm(self):
+  from escalation import manager_counts
+  frame=pd.DataFrame({'Work Order Type':['Reactive','PPM','PPM','Corrective','Pro-active'],
+    'Status':['ACTIVE','ACTIVE','COMPLETE','ACTIVE','ACTIVE'],MANAGER:['PPM Manager']*5})
+  with patch('escalation.scan',return_value=iter([frame])):
+   rows=manager_counts(Path('.'),{'ppm_regression':True})
+  self.assertEqual(len(rows),1)
+  self.assertEqual((rows[0]['open'],rows[0]['total'],rows[0]['PPM']),(4,5,1))
+  self.assertEqual(rows[0]['aliases']['PPM'],['PPM Manager'])
  def test_gmail_app_password_spaces_and_empty_environment_override(self):
   from escalation import smtp_settings
   config={'smtp':{'host':'smtp.gmail.com','username':'sender@example.com','password':'aaaa bbbb cccc dddd','sender':'sender@example.com','port':'587'}}
