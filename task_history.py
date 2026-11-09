@@ -133,6 +133,12 @@ def executive_trend(root,now=None):
     now=pd.Timestamp(now or datetime.now(TZ));now=now.tz_localize(TZ) if now.tzinfo is None else now.tz_convert(TZ)
     start=str((now-timedelta(days=6)).date());end=str(now.date())
     st.subheader('7-day open-task trend')
+    basis=st.radio('Trend basis',['Uploads','Daily reminders'],horizontal=True,key='open_trend_basis')
+    if basis=='Uploads':
+        from escalation import snapshot
+        current,_=snapshot(root)
+        import_trend(root,current,now)
+        return
     scope=st.radio('Trend scope',['All open work orders','Reminder queues'],horizontal=True,key='open_trend_scope')
     kind='All open' if scope=='All open work orders' else 'Queue'
     with history_db(root) as db:
@@ -147,8 +153,97 @@ def executive_trend(root,now=None):
     frame['Queue']=frame['Queue'].replace({'Operations':'Aged P1/P2 work orders','Procurement':'Open RFQs'})
     frame['Date']=pd.to_datetime(frame['Date'])
     legend=alt.selection_point(fields=['Queue'],bind='legend')
-    chart=alt.Chart(frame).mark_line(point=True,invalid='break-paths-show-domains').encode(x=alt.X('Date:T',axis=alt.Axis(format='%d %b',title='Daily capture (Dubai)')),
+    chart=alt.Chart(frame).mark_bar().encode(x=alt.X('Date:O',axis=alt.Axis(format='%d %b',formatType='time',title='Daily capture (Dubai)')),xOffset='Queue:N',
         y=alt.Y('Open tasks:Q',scale=alt.Scale(zero=True)),color=alt.Color('Queue:N',scale=alt.Scale(range=['#122843','#B3955B','#46845a','#b44636'])),
         opacity=alt.condition(legend,alt.value(1),alt.value(.15)),tooltip=['Date:T','Queue:N','Open tasks:Q','Captured (Dubai):N','Source imports:N']).add_params(legend).properties(height=280)
     st.altair_chart(chart,width='stretch')
     st.caption(TREND_NOTE+' History starts '+first_capture+'. Click a legend name to highlight it; hover over points for counts and import dates.')
+
+
+def import_observations(root):
+    """Recover genuine import observations from retained snapshots, not assumed days."""
+    from escalation import scan,normalized,OPEN,TZ
+    with history_db(root) as db:
+        db.execute('CREATE TABLE IF NOT EXISTS imports(stamp TEXT PRIMARY KEY,directory TEXT,counts TEXT)')
+        known={r[0] for r in db.execute('SELECT stamp FROM imports')}
+        candidates={}
+        for directory in sorted(Path(root).glob('snapshot-*')):
+            try:
+                manifest=json.loads((directory/'manifest.json').read_text())
+                stamp=manifest.get('work_order_source',{}).get('imported_at')
+                if stamp:candidates[stamp]=(directory,manifest)
+            except (ValueError,OSError):continue
+        for stamp,(directory,manifest) in candidates.items():
+            if stamp in known:continue
+            counts={name:0 for name in ['Reactive','PPM','Corrective','Pro-active']}
+            for frame in scan(directory,manifest,'Reactive',['Work Order Type','Status']):
+                if not {'Work Order Type','Status'}<=set(frame):continue
+                part=frame.loc[normalized(frame.Status).isin(OPEN)]
+                for name,n in part['Work Order Type'].value_counts().items():
+                    if name in counts:counts[name]+=int(n)
+            db.execute('INSERT OR IGNORE INTO imports VALUES(?,?,?)',(stamp,directory.name,json.dumps(counts)))
+        rows=db.execute('SELECT stamp,directory,counts FROM imports ORDER BY stamp').fetchall()
+    return [{'stamp':stamp,'directory':directory,'counts':json.loads(counts)} for stamp,directory,counts in rows]
+
+
+def compare_imports(root,before,after):
+    from escalation import scan,normalized,OPEN
+    old=Path(root)/before;new=Path(root)/after
+    old_manifest=json.loads((old/'manifest.json').read_text());new_manifest=json.loads((new/'manifest.json').read_text())
+    opened={}
+    for frame in scan(old,old_manifest,'Reactive',['WO No.','Task Id','Work Order Type','Status']):
+        identifier='WO No.' if 'WO No.' in frame else 'Task Id'
+        for row in frame.loc[normalized(frame.Status).isin(OPEN)].to_dict('records'):
+            opened[str(row[identifier])]=row.get('Work Order Type','Other')
+    kinds=['Reactive','PPM','Corrective','Pro-active']
+    stats={kind:{'Work order type':kind,'Previous open':sum(v==kind for v in opened.values()),'Latest open':0,'Still open':0,'Now completed':0,'Now cancelled':0,'Other status':0,'Not in latest':0,'New / reopened':0} for kind in kinds}
+    seen=set()
+    for frame in scan(new,new_manifest,'Reactive',['WO No.','Task Id','Work Order Type','Status']):
+        identifier='WO No.' if 'WO No.' in frame else 'Task Id'
+        for row in frame.to_dict('records'):
+            record_id=str(row[identifier]);kind=row.get('Work Order Type','Other');status=str(row.get('Status','')).strip().upper()
+            if kind in stats and status in OPEN:
+                stats[kind]['Latest open']+=1
+                if record_id not in opened:stats[kind]['New / reopened']+=1
+            if record_id in opened and opened[record_id] in stats:
+                seen.add(record_id);field='Still open' if status in OPEN else 'Now completed' if status in {'COMPLETE','HISTORY'} else 'Now cancelled' if status in {'CANCELED','CANCELLED'} else 'Other status'
+                stats[opened[record_id]][field]+=1
+    for record_id,kind in opened.items():
+        if record_id not in seen and kind in stats:stats[kind]['Not in latest']+=1
+    result=pd.DataFrame(stats.values());result.insert(3,'Change in open',result['Latest open']-result['Previous open'])
+    totals={c:int(result[c].sum()) for c in result if c!='Work order type'};totals['Work order type']='Total'
+    return pd.concat([result,pd.DataFrame([totals])],ignore_index=True)
+
+
+def import_trend(root,current,now=None):
+    import streamlit as st
+    import altair as alt
+    from escalation import TZ
+    now=pd.Timestamp(now or datetime.now(TZ));now=now.tz_localize(TZ) if now.tzinfo is None else now.tz_convert(TZ)
+    observations=import_observations(root)
+    manifest=json.loads((Path(current)/'manifest.json').read_text())
+    active_stamp=manifest.get('work_order_source',{}).get('imported_at')
+    cutoff=now.normalize()-timedelta(days=6)
+    visible=[o for o in observations if pd.to_datetime(o['stamp'],utc=True).tz_convert(TZ)>=cutoff]
+    rows=[]
+    for o in visible:
+        stamp=pd.to_datetime(o['stamp'],utc=True).tz_convert(TZ).strftime('%d %b %H:%M:%S')
+        rows.extend({'Upload (Dubai)':stamp,'Imported at':o['stamp'],'Type':kind,'Open tasks':n} for kind,n in o['counts'].items())
+    if rows:
+        legend=alt.selection_point(fields=['Type'],bind='legend')
+        chart=alt.Chart(pd.DataFrame(rows)).mark_bar().encode(x=alt.X('Upload (Dubai):N',sort=None,axis=alt.Axis(labelAngle=-25)),xOffset='Type:N',y=alt.Y('Open tasks:Q',scale=alt.Scale(zero=True)),color=alt.Color('Type:N',scale=alt.Scale(range=['#122843','#B3955B','#46845a','#b44636'])),opacity=alt.condition(legend,alt.value(1),alt.value(.15)),tooltip=['Upload (Dubai):N','Type:N','Open tasks:Q','Imported at:N']).add_params(legend).properties(height=280)
+        st.altair_chart(chart,width='stretch')
+    st.caption('Actual work-order imports during the last seven days. Every upload is retained, including multiple uploads on the same day. No counts are invented for days without an upload. RFQ and agreement data are not replaced by a work-order upload.')
+    earlier=[o for o in observations if o['stamp']!=active_stamp and pd.to_datetime(o['stamp'],utc=True)<pd.to_datetime(active_stamp,utc=True)] if active_stamp else []
+    if not earlier:
+        st.info('A previous work-order import is needed for a comparison.');return
+    labels={o['stamp']:pd.to_datetime(o['stamp'],utc=True).tz_convert(TZ).strftime('%d %b %Y, %H:%M:%S Dubai') for o in earlier}
+    preferred=earlier[-1]['stamp']
+    if st.session_state.get('_upload_comparison_current')!=active_stamp:
+        st.session_state.pop('import_comparison_baseline',None)
+        st.session_state['_upload_comparison_current']=active_stamp
+    baseline=st.selectbox('Compare latest upload with',list(labels),index=list(labels).index(preferred),format_func=labels.get,key='import_comparison_baseline')
+    source=next(o for o in earlier if o['stamp']==baseline)
+    st.caption('Latest: '+pd.to_datetime(active_stamp,utc=True).tz_convert(TZ).strftime('%d %b %Y, %H:%M:%S Dubai'))
+    st.dataframe(compare_imports(root,source['directory'],Path(current).name),hide_index=True,width='stretch')
+    st.caption('Change in open = latest minus previous; a negative number is a reduction. Prior open records are matched by WO number. Completed, cancelled and missing records are reported separately; new/reopened records can increase the backlog.')
