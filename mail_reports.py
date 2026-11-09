@@ -82,13 +82,14 @@ def pdf_bytes(kind, frame, sent_at, deadline, source_date, summary=None, expired
         return table
     if summary is not None and len(summary):
         story.extend([Paragraph('Open task breakdown',heading),Spacer(1,6),make_table(summary,[2 if not pd.api.types.is_numeric_dtype(summary[c]) else 1 for c in summary],padding=4),Spacer(1,14)])
-        if '7-day open trend' in summary:
+        if '5-day open trend' in summary:
             from task_history import TREND_NOTE
             story.extend([Paragraph(html.escape(TREND_NOTE.replace('—','-')),small),Spacer(1,12)])
     if summary is not None and len(summary)>8:story.append(PageBreak())
     story.extend([Paragraph('All open task records',heading),Spacer(1,6)])
-    labels={'Contract Manager (Contract) (Contract)':'Contract manager','Assigned To (Procurement / Store) please put e-mail address of procurement / store officer':'Procurement assignee','Quotation Request Date:':'Requested','Approved by (Operation)':'Operations approver','Project Details:':'Project','Created On':'Opened','System Status':'Status','Work Order Type':'Type'}
-    weights=([.8,.8,.5,.7,1,.5,1.3,1.1,1.3] if kind=='Operations' else [.8,.7,.5,1,1.7,1.2,1.3])[:len(frame.columns)]
+    labels={'Case Number (Case) (Case)':'Case number','Contract Manager (Contract) (Contract)':'Contract manager','Assigned To (Procurement / Store) please put e-mail address of procurement / store officer':'Procurement assignee','Quotation Request Date:':'Requested','Approved by (Operation)':'Operations approver','Project Details:':'Project','Created On':'Opened','System Status':'Status','Work Order Type':'Type'}
+    column_weights={'Case Number (Case) (Case)':1,'WO No.':.7,'Work Order Type':.8,'Priority':.5,'System Status':.7,'Created On':1,'Age (days)':.5,'Service Account':1.3,'Building':1.1,'Contract Manager (Contract) (Contract)':1.3,'Reference Number':.8,'Status':.7,'Priority:':.5,'Quotation Request Date:':1,'Project Details:':1.7,'Approved by (Operation)':1.2,'Assigned To (Procurement / Store) please put e-mail address of procurement / store officer':1.3}
+    weights=[column_weights.get(c,1) for c in frame.columns]
     if len(frame):story.append(make_table(frame,weights,labels))
     else:story.append(Paragraph('No open task records in this email.',body))
     if expired_contracts:
