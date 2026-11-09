@@ -6,6 +6,7 @@ import json
 import os
 import sqlite3
 import pandas as pd
+import streamlit as st
 
 @contextmanager
 def history_db(root):
@@ -186,6 +187,7 @@ def import_observations(root):
     return [{'stamp':stamp,'directory':directory,'counts':json.loads(counts)} for stamp,directory,counts in rows]
 
 
+@st.cache_data(ttl=3600,max_entries=6,show_spinner=False)
 def compare_imports(root,before,after):
     from escalation import scan,normalized,OPEN
     old=Path(root)/before;new=Path(root)/after
