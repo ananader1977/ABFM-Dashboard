@@ -35,7 +35,7 @@ def source_visuals(page):
 
 def work_order_columns(available, view, filter_fields=(), visual=None):
     needed = {"Task Id", "Status", "Task Type", "Task Due Date", "Task Reported Date", "Category", "Priority", "Project Name", "Contract Title", "Contract In Charge", "Building", "Building Name", "Service Type", "Supervisor", "Trade", "SEGMET", "Categories"}
-    needed.update({"Technician · Assigned Resource", "Contract Manager (Contract)"})
+    needed.update({"Technician · Assigned Resource", "Contract Manager (Contract)", "Source site"})
     needed.update(filter_fields)
     if view == 'Source charts':
         needed.update({'Documents', 'Resources'})
