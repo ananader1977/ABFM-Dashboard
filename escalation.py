@@ -214,7 +214,8 @@ def routes(tasks, rfqs, config, expired_contracts=None):
             if dest and all(email(dest[c]) for c in ['email','director','coo']):
                 group['_to'].add(email(dest['email']));group['_cc'].add(email(dest['coo']))
     managers={email(r.get('procurement_manager')) for r in staff if email(r.get('procurement_manager'))}
-    procurement={'kind':'Procurement','_to':set(),'_cc':managers,'records':[]}
+    leadership={email(address) for address in config.get('procurement_leadership_cc',[]) if email(address)}
+    procurement={'kind':'Procurement','_to':set(),'_cc':managers | leadership,'records':[]}
     if len(managers)==1:
         for person in staff:
             if not text(person.get('assignee')):continue
@@ -573,6 +574,17 @@ def admin_panel(root):
     import streamlit as st
     st.subheader('Escalation emails')
     config=load_config(root)
+    with st.form('procurement_leadership'):
+        leadership_cc=st.text_input('Procurement leadership CC',value=', '.join(config.get('procurement_leadership_cc',[])),help='Verified directors and COO addresses, separated by commas. The procurement manager is also copied automatically.')
+        save_leadership=st.form_submit_button('Save procurement leadership CC')
+    if save_leadership:
+        addresses=[part.strip() for part in leadership_cc.split(',') if part.strip()]
+        if any(not email(address) for address in addresses):
+            st.error('Enter valid email addresses separated by commas.')
+        else:
+            config['procurement_leadership_cc']=sorted({email(address) for address in addresses})
+            save_config(root,config)
+            st.success('Procurement leadership CC saved for daily and manual live procurement emails. Test emails still go only to the test recipient.')
     roster=st.file_uploader('Responsible parties workbook',type=['xlsx','json'],key='escalation_roster')
     if roster and st.button('Import operations and procurement recipients'):
         try:
@@ -591,7 +603,7 @@ def admin_panel(root):
     directory,manifest=snapshot(root)
     tasks=priority_tasks(directory,manifest);rfqs=open_rfqs(directory,manifest)
     groups,issues=routes(tasks,rfqs,config,expired_agreements(directory,manifest))
-    st.caption('Daily schedule: 08:00 Asia/Dubai. One operations email per director, CC that director and COO; Rafik remains separate. One procurement email to all verified procurement staff, CC the procurement manager. Each email has individual Excel files and one combined PDF. Test sends mirror this grouping and go only to the test recipient.')
+    st.caption('Daily schedule: 08:00 Asia/Dubai. One operations email per director, CC that director and COO; Rafik remains separate. One procurement email to all verified procurement staff, CC the procurement manager and saved leadership CC addresses. Each email has individual Excel files and one combined PDF. Test sends mirror this grouping and go only to the test recipient.')
     st.dataframe(pd.DataFrame([{'Email type':g['kind'],'To':g['to'],'CC':', '.join(g['cc']),'Individual Excel files':len(g.get('individuals',[])),'Records':len(g['records']),'Expired agreements':len(g.get('expired_contracts',[]))} for g in groups]),hide_index=True,width='stretch')
     if issues:
         st.warning(f'{len(issues):,} records have missing or conflicting routing and will not be emailed until corrected.')
