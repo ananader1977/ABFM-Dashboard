@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pyarrow.dataset as ds
+import streamlit as st
 from analytics import OPEN, normalized
 
 TZ = ZoneInfo('Asia/Dubai')
@@ -133,6 +134,7 @@ def priority_mask(frame, now=None):
     return normalized(frame.Status).isin(OPEN) & priority & opened_time(frame['Created On']).lt(now-pd.Timedelta(days=7))
 
 
+@st.cache_data(ttl=60,max_entries=3,show_spinner=False)
 def priority_tasks(directory,manifest,now=None):
     cols=['WO No.','Case Number (Case) (Case)','Task Id','Work Order Type','Priority','System Status','Status','Created On','Service Account','Building','Category','Assigned Resource',MANAGER]
     frames=[]
@@ -147,6 +149,7 @@ def priority_tasks(directory,manifest,now=None):
     return result.sort_values(['Priority','Created On'])
 
 
+@st.cache_data(ttl=300,max_entries=6,show_spinner=False)
 def manager_counts(directory,manifest):
     counts={};totals={};aliases={}
     cols=['Work Order Type','Status',MANAGER]
@@ -165,6 +168,7 @@ def manager_counts(directory,manifest):
     return sorted(rows,key=lambda row:(row['name']=='(Not assigned)',-row['open'],key(row['name'])))
 
 
+@st.cache_data(ttl=300,max_entries=3,show_spinner=False)
 def open_rfqs(directory,manifest):
     cols=['Reference Number','Status','Priority:','Quotation Request Date:','Project Details:','Approved by (Operation)',ASSIGNEE,'Detailed Scope of Work – (Needs to include details of material, services and manpower clearly)']
     frames=[]
@@ -246,6 +250,7 @@ def routes(tasks, rfqs, config, expired_contracts=None):
     return result,issues
 
 
+@st.cache_data(ttl=300,max_entries=3,show_spinner=False)
 def expired_agreements(directory,manifest):
     from analytics import dates,today
     info=manifest.get('tables',{}).get('Subcontractor AMC')
@@ -540,6 +545,7 @@ def executive_panels(directory,manifest):
     st.download_button('Download aged P1/P2 tasks · Excel',data=lambda:excel_bytes(list(display.columns),display.itertuples(index=False,name=None)),file_name='ABFM_Aged_P1_P2.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',on_click='ignore')
 
 
+@st.cache_data(ttl=300,max_entries=3,show_spinner=False)
 def agreement_stats(directory,manifest):
     from analytics import dates, today
     total=expired=0
