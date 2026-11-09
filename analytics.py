@@ -129,6 +129,13 @@ def summarize(frame, table, page):
             pass
         add_sum("Annual Value (Excl. 5%)" if table == "AMC" else "Monthly Cost", "Annual value (AED)" if table == "AMC" else "Monthly cost (AED)")
     elif table == "RFQ":
+        status=normalized(frame[resolve(frame,'Status')])
+        progress=int(status.eq('IN PROGRESS').sum())
+        returned=int(status.eq('RETURNED').sum())
+        eligible=len(frame)-int(status.isin({'CANCELED','CANCELLED'}).sum())
+        metrics['In progress']=progress
+        metrics['Returned']=returned
+        metrics['In progress + Returned % (excl. canceled)']=100*(progress+returned)/eligible if eligible else None
         try:
             delayed = numbers(frame, "Delay Days").gt(0)
             metrics["Delayed RFQs (source field)"] = int(delayed.sum())
