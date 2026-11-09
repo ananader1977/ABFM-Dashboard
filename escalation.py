@@ -26,6 +26,7 @@ from analytics import OPEN, normalized
 
 TZ = ZoneInfo('Asia/Dubai')
 MANAGER = 'Contract Manager (Contract) (Contract)'
+MANAGER_WORK_TYPES = ('Reactive', 'PPM', 'Corrective', 'Pro-active')
 ASSIGNEE = 'Assigned To (Procurement / Store) please put e-mail address of procurement / store officer'
 LOG = logging.getLogger('abfm.escalation')
 
@@ -155,16 +156,16 @@ def manager_counts(directory,manifest):
     cols=['Work Order Type','Status',MANAGER]
     for frame in scan(directory,manifest,'Reactive',cols):
         if not set(cols)<=set(frame):continue
-        frame=frame.loc[frame['Work Order Type'].isin(['Reactive','Corrective','Pro-active'])].copy()
+        frame=frame.loc[frame['Work Order Type'].isin(MANAGER_WORK_TYPES)].copy()
         frame['_manager_variant']=frame[MANAGER].fillna('(Not assigned)').replace('','(Not assigned)')
         frame[MANAGER]=frame['_manager_variant'].map(lambda name: 'Rafik Jabbour' if key(name).lstrip('#').strip()=='rafik jabbour' else display_name(name))
         for (name,kind),group in frame.groupby([MANAGER,'Work Order Type'],dropna=False):
             aliases.setdefault((name,kind),set()).update(group['_manager_variant'].unique())
             totals[name]=totals.get(name,0)+len(group)
             counts[(name,kind)]=counts.get((name,kind),0)+int(normalized(group.Status).isin(OPEN).sum())
-    rows=[{'name':name,'aliases':{k:sorted(aliases.get((name,k),set())) for k in ['Reactive','Corrective','Pro-active']},'Reactive':counts.get((name,'Reactive'),0),'Corrective':counts.get((name,'Corrective'),0),
+    rows=[{'name':name,'aliases':{k:sorted(aliases.get((name,k),set())) for k in MANAGER_WORK_TYPES},'Reactive':counts.get((name,'Reactive'),0),'PPM':counts.get((name,'PPM'),0),'Corrective':counts.get((name,'Corrective'),0),
              'Pro-active':counts.get((name,'Pro-active'),0),'total':totals[name],
-             'open':sum(counts.get((name,k),0) for k in ['Reactive','Corrective','Pro-active'])} for name in totals]
+             'open':sum(counts.get((name,k),0) for k in MANAGER_WORK_TYPES)} for name in totals]
     return sorted(rows,key=lambda row:(row['name']=='(Not assigned)',-row['open'],key(row['name'])))
 
 
@@ -568,7 +569,7 @@ def manager_comparison(directory,manifest):
     rows={r['name']:r for r in current}
     for name,old in previous.items():
         if name not in rows:
-            rows[name]={'name':name,'open':0,'total':0,'Reactive':0,'Corrective':0,'Pro-active':0,'aliases':{k:[] for k in ['Reactive','Corrective','Pro-active']}}
+            rows[name]={'name':name,'open':0,'total':0,'Reactive':0,'PPM':0,'Corrective':0,'Pro-active':0,'aliases':{k:[] for k in MANAGER_WORK_TYPES}}
     for row in rows.values():
         row['previous_open']=previous.get(row['name'],{}).get('open',0) if previous_stamp else None
         row['change']=row['open']-row['previous_open'] if previous_stamp else None
@@ -583,7 +584,7 @@ def review_cards(directory,manifest):
     if previous_stamp:
         previous_date=pd.to_datetime(previous_stamp,utc=True).tz_convert(TZ).strftime('%d %b %Y, %H:%M Dubai')
         current_date=pd.to_datetime(manifest['work_order_source']['imported_at'],utc=True).tz_convert(TZ).strftime('%d %b %Y, %H:%M Dubai')
-        st.caption(f'Manager comparison · Previous: {previous_date} · Current: {current_date}. Reactive, Corrective and Pro-active open tasks; PPM is excluded from these cards. Changes include new tasks and reassignment, not just closures.')
+        st.caption(f'Manager comparison · Previous: {previous_date} · Current: {current_date}. Reactive, PPM, Corrective and Pro-active open tasks. Changes include new tasks and reassignment, not just closures.')
     def open_manager(name,kind,variants):
         from executive import navigate
         st.session_state['quick_'+kind+'_Contract Manager (Contract)'] = list(dict.fromkeys('(Not specified)' if variant=='(Not assigned)' else display_name(variant) for variant in variants))
@@ -593,15 +594,16 @@ def review_cards(directory,manifest):
             with col,st.container(border=True,key='compact_review_manager_'+hashlib.sha256(row['name'].encode()).hexdigest()[:12]):
                 st.markdown('**'+display_name(row['name'])+'**')
                 pct=100*row['open']/row['total'] if row['total'] else 0
-                styled_metric(st, 'Current open · Reactive / Corrective / Pro-active', f"{row['open']:,}", percentage=pct, key='manager_'+hashlib.sha256(row['name'].encode()).hexdigest()[:12])
+                styled_metric(st, 'Current open · Reactive / PPM / Corrective / Pro-active', f"{row['open']:,}", percentage=pct, key='manager_'+hashlib.sha256(row['name'].encode()).hexdigest()[:12])
                 previous='—' if row['previous_open'] is None else f"{row['previous_open']:,}"
                 change='—' if row['change'] is None else f"{row['change']:+,}"
                 delta_color='#16703d' if row['change'] is not None and row['change']<0 else '#b42318' if row['change'] is not None and row['change']>0 else '#122843'
                 st.markdown(f'<div style="font-size:.85rem;margin-bottom:.5rem">Previous open: <strong>{previous}</strong> · Change: <strong style="color:{delta_color}">{change}</strong></div>',unsafe_allow_html=True)
                 with st.container(key='task_links_'+hashlib.sha256(row['name'].encode()).hexdigest()[:12]):
-                    for link,kind in zip(st.columns([1,1,1.15],gap='small'),['Reactive','Corrective','Pro-active']):
-                        with link:
-                            st.button(f'{kind}: {row[kind]:,}',key='manager_'+row['name']+'_'+kind,type='tertiary',disabled=not row[kind],on_click=open_manager,args=(row['name'],kind,row['aliases'][kind]))
+                    for start in (0, 2):
+                        for link,kind in zip(st.columns(2,gap='small'),MANAGER_WORK_TYPES[start:start+2]):
+                            with link:
+                                st.button(f'{kind}: {row[kind]:,}',key='manager_'+row['name']+'_'+kind,type='tertiary',disabled=not row[kind],on_click=open_manager,args=(row['name'],kind,row['aliases'][kind]))
                 pct=100*row['open']/row['total'] if row['total'] else 0
                 color, weight, _ = status_style('Open',pct)
                 st.markdown(f'<span style="color:{color};font-weight:{weight}">{pct:.2f}%</span> of {row["total"]:,} work orders',unsafe_allow_html=True)
