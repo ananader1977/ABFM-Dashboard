@@ -86,3 +86,14 @@ class TaskHistoryTests(unittest.TestCase):
   script=f"from task_history import executive_trend\nfrom datetime import datetime\nfrom escalation import TZ\nexecutive_trend({str(self.root)!r},datetime(2026,11,9,14,tzinfo=TZ))"
   app=AppTest.from_string(script).run();self.assertFalse(app.exception)
   self.assertEqual(len(app.selectbox),1)
+ def test_manager_cards_show_previous_current_and_cleared_managers(self):
+  import shutil
+  from escalation import manager_comparison
+  self.install([self.wo(1),self.wo(2,manager='# Rafik Jabour')],[self.rfq('R1')],'2026-11-07T08:00:00+00:00')
+  shutil.copytree(self.directory,self.root/'snapshot-before')
+  self.install([self.wo(1,'COMPLETE'),self.wo(2,manager='Rafik Jabbour'),self.wo(3,manager='Rafik Jabbour')],[self.rfq('R1')],'2026-11-09T08:00:00+00:00')
+  rows,stamp=manager_comparison(self.directory,self.manifest)
+  self.assertEqual(stamp,'2026-11-07T08:00:00+00:00')
+  rafik=next(r for r in rows if r['name']=='Rafik Jabbour');alice=next(r for r in rows if r['name']=='Alice')
+  self.assertEqual((rafik['previous_open'],rafik['open'],rafik['change']),(1,2,1))
+  self.assertEqual((alice['previous_open'],alice['open'],alice['change']),(1,0,-1))
