@@ -70,4 +70,19 @@ class TaskHistoryTests(unittest.TestCase):
   self.install([self.wo(1)],[self.rfq('R1')],'2026-11-09');self.record(9)
   script=f"from task_history import executive_trend\nfrom datetime import datetime\nfrom escalation import TZ\nexecutive_trend({str(self.root)!r},datetime(2026,11,9,9,tzinfo=TZ))"
   app=AppTest.from_string(script).run();self.assertFalse(app.exception)
-  app.radio[0].set_value('Reminder queues').run();self.assertFalse(app.exception)
+  app.radio[0].set_value('Daily reminders').run();self.assertFalse(app.exception)
+  app.radio[1].set_value('Reminder queues').run();self.assertFalse(app.exception)
+ def test_upload_comparison_recovers_old_snapshot_and_tracks_outcomes(self):
+  import shutil
+  from task_history import import_observations,compare_imports
+  self.install([self.wo(i) for i in range(1,5)],[self.rfq('R1')],'2026-11-07T08:00:00+00:00')
+  before=self.root/'snapshot-before';shutil.copytree(self.directory,before)
+  self.install([self.wo(1),self.wo(2,'COMPLETE'),self.wo(3,'CANCELLED'),self.wo(5)],[self.rfq('R1')],'2026-11-09T08:00:00+00:00')
+  rows=import_observations(self.root);self.assertEqual(len(rows),2)
+  self.assertEqual(len(import_observations(self.root)),2)
+  total=compare_imports(self.root,before.name,self.directory.name).iloc[-1]
+  for column,expected in [('Previous open',4),('Latest open',2),('Change in open',-2),('Still open',1),('Now completed',1),('Now cancelled',1),('Not in latest',1),('New / reopened',1)]:self.assertEqual(total[column],expected)
+  from streamlit.testing.v1 import AppTest
+  script=f"from task_history import executive_trend\nfrom datetime import datetime\nfrom escalation import TZ\nexecutive_trend({str(self.root)!r},datetime(2026,11,9,14,tzinfo=TZ))"
+  app=AppTest.from_string(script).run();self.assertFalse(app.exception)
+  self.assertEqual(len(app.selectbox),1)
