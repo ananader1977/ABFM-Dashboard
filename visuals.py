@@ -86,6 +86,13 @@ h1,h2{font-family:Calibri,Arial,sans-serif!important;font-weight:500!important}
 
 
 def status_style(label, percentage=None):
+    if label=='In progress + Returned % (excl. canceled)':
+        if percentage is None:return INK, '500', 'normal'
+        if percentage>95:return '#16703d', '700', 'green'
+        if percentage>=90:return '#6b9f5c', '700', 'lightgreen'
+        return '#b42318', '700', 'red'
+    if label in {'Past end date','In progress','Returned'}:
+        return '#b42318', '700', 'red'
     if re.search(r'\b(?:open|expired)\b', label, flags=re.I) and percentage is not None:
         if percentage > 10:
             return '#b42318', '700', 'red'
