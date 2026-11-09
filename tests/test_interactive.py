@@ -10,6 +10,22 @@ from interactive import apply_chart_filters, selection_values, excel_bytes, expo
 from work_orders import canonicalize, install_replacement
 
 class InteractionTests(unittest.TestCase):
+    def test_reactive_civil_is_a_separate_visible_category_filter(self):
+        from streamlit.testing.v1 import AppTest
+        script="""import pandas as pd
+import streamlit as st
+from interactive import quick_filters,MANAGER,TECHNICIAN
+frame=pd.DataFrame({'Category':['Civil','General','Civil','HVAC'],MANAGER:['Manager']*4,TECHNICIAN:['Technician']*4})
+selected=quick_filters(frame,'Reactive')
+st.write('Selected categories: '+','.join(selected.Category))
+"""
+        app=AppTest.from_string(script).run()
+        self.assertFalse(app.exception)
+        category=next(widget for widget in app.multiselect if widget.label=='Category')
+        self.assertIn('Civil',category.options);self.assertIn('General',category.options)
+        category.set_value(['Civil']).run()
+        self.assertFalse(app.exception)
+        self.assertIn('Selected categories: Civil,Civil',[m.value for m in app.markdown])
     def test_chart_filters_intersect_and_keep_original_positions(self):
         f = pd.DataFrame({'Status':['A','B','A'],MANAGER:['X','X','Y']},index=[2,5,9])
         self.assertEqual(list(apply_chart_filters(f,{'Status':['A'],MANAGER:['X']}).index),[2])
