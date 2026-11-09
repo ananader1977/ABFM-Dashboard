@@ -546,10 +546,35 @@ def agreement_stats(directory,manifest):
     return {'total':total,'expired':expired,'percentage':100*expired/total if total else 0}
 
 
+def manager_comparison(directory,manifest):
+    from task_history import import_observations
+    current=manager_counts(directory,manifest)
+    stamp=manifest.get('work_order_source',{}).get('imported_at')
+    earlier=[o for o in import_observations(Path(directory).parent) if stamp and pd.to_datetime(o['stamp'],utc=True)<pd.to_datetime(stamp,utc=True)]
+    previous={};previous_stamp=None
+    if earlier:
+        baseline=earlier[-1];previous_stamp=baseline['stamp']
+        old=Path(directory).parent/baseline['directory']
+        previous={r['name']:r for r in manager_counts(old,json.loads((old/'manifest.json').read_text()))}
+    rows={r['name']:r for r in current}
+    for name,old in previous.items():
+        if name not in rows:
+            rows[name]={'name':name,'open':0,'total':0,'Reactive':0,'Corrective':0,'Pro-active':0,'aliases':{k:[] for k in ['Reactive','Corrective','Pro-active']}}
+    for row in rows.values():
+        row['previous_open']=previous.get(row['name'],{}).get('open',0) if previous_stamp else None
+        row['change']=row['open']-row['previous_open'] if previous_stamp else None
+    visible=[r for r in rows.values() if r['open']>0 or (r['previous_open'] or 0)>0]
+    return sorted(visible,key=lambda r:(r['name']=='(Not assigned)',-r['open'],key(r['name']))),previous_stamp
+
+
 def review_cards(directory,manifest):
     import streamlit as st
     from visuals import styled_metric, status_style
-    rows=[row for row in manager_counts(directory,manifest) if row['open'] > 0]
+    rows,previous_stamp=manager_comparison(directory,manifest)
+    if previous_stamp:
+        previous_date=pd.to_datetime(previous_stamp,utc=True).tz_convert(TZ).strftime('%d %b %Y, %H:%M Dubai')
+        current_date=pd.to_datetime(manifest['work_order_source']['imported_at'],utc=True).tz_convert(TZ).strftime('%d %b %Y, %H:%M Dubai')
+        st.caption(f'Manager comparison · Previous: {previous_date} · Current: {current_date}. Reactive, Corrective and Pro-active open tasks; PPM is excluded from these cards. Changes include new tasks and reassignment, not just closures.')
     def open_manager(name,kind,variants):
         from executive import navigate
         st.session_state['quick_'+kind+'_Contract Manager (Contract)'] = list(dict.fromkeys('(Not specified)' if variant=='(Not assigned)' else display_name(variant) for variant in variants))
@@ -559,7 +584,11 @@ def review_cards(directory,manifest):
             with col,st.container(border=True,key='compact_review_manager_'+hashlib.sha256(row['name'].encode()).hexdigest()[:12]):
                 st.markdown('**'+display_name(row['name'])+'**')
                 pct=100*row['open']/row['total'] if row['total'] else 0
-                styled_metric(st, 'Open Reactive / Corrective / Pro-active', f"{row['open']:,}", percentage=pct, key='manager_'+hashlib.sha256(row['name'].encode()).hexdigest()[:12])
+                styled_metric(st, 'Current open · Reactive / Corrective / Pro-active', f"{row['open']:,}", percentage=pct, key='manager_'+hashlib.sha256(row['name'].encode()).hexdigest()[:12])
+                previous='—' if row['previous_open'] is None else f"{row['previous_open']:,}"
+                change='—' if row['change'] is None else f"{row['change']:+,}"
+                delta_color='#16703d' if row['change'] is not None and row['change']<0 else '#b42318' if row['change'] is not None and row['change']>0 else '#122843'
+                st.markdown(f'<div style="font-size:.85rem;margin-bottom:.5rem">Previous open: <strong>{previous}</strong> · Change: <strong style="color:{delta_color}">{change}</strong></div>',unsafe_allow_html=True)
                 with st.container(key='task_links_'+hashlib.sha256(row['name'].encode()).hexdigest()[:12]):
                     for link,kind in zip(st.columns([1,1,1.15],gap='small'),['Reactive','Corrective','Pro-active']):
                         with link:
