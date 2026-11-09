@@ -122,7 +122,8 @@ def admin_panel(user):
             preferred=next((i for i,name in enumerate(sheets) if 'work order' in name.casefold() or 'workorder' in name.casefold()),0)
             sheet=st.selectbox('Work-order worksheet',sheets,index=preferred,key='replacement_work_order_sheet')
             preview=preview_excel(replacement,sheet)
-            st.caption('First five data rows. Headings must be in row 1; the complete sheet is validated when you apply the replacement. Other sheets in this workbook are not imported.')
+            mapped='Field Mapping' in sheets
+            st.caption('First five master rows. Field Mapping was detected: applying this workbook merges the master and mapped site sheets, and updates recipients from Operation Data and Procurement Data.' if mapped else 'First five data rows. Headings must be in row 1; the complete sheet is validated when you apply the replacement. Other sheets in this workbook are not imported.')
             st.dataframe(preview,hide_index=True,width='stretch')
             if st.button("Apply replacement work orders"):
                 with st.spinner("Reading Excel, validating records and replacing work orders…"):
@@ -133,6 +134,10 @@ def admin_panel(user):
                 if report.get('blank_priority_rows'):
                     st.info(f"{report['blank_priority_rows']:,} records have blank priority and were retained. Records without priority are excluded from P1/P2 escalation.")
                 st.caption('Imported types: '+', '.join(f'{name}: {count:,}' for name,count in report['counts'].items()))
+                if report.get('merged_sources'):
+                    st.dataframe(pd.DataFrame([{'Source sheet':name,'Imported records':count} for name,count in report['merged_sources'].items()]),hide_index=True,width='stretch')
+                    if report.get('empty_source_sheets'):st.warning('No records in: '+', '.join(report['empty_source_sheets']))
+                    if report.get('mapping_notes'):st.info(f"{len(report['mapping_notes'])} work types were filled from an explicit PPM description; source values and mapping notes are retained.")
         except (ValueError,KeyError,TypeError,OSError) as error:
             st.error(str(error))
     from escalation import admin_panel as escalation_admin
