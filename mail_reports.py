@@ -82,6 +82,9 @@ def pdf_bytes(kind, frame, sent_at, deadline, source_date, summary=None, expired
         return table
     if summary is not None and len(summary):
         story.extend([Paragraph('Open task breakdown',heading),Spacer(1,6),make_table(summary,[2 if not pd.api.types.is_numeric_dtype(summary[c]) else 1 for c in summary],padding=4),Spacer(1,14)])
+        if '7-day open trend' in summary:
+            from task_history import TREND_NOTE
+            story.extend([Paragraph(html.escape(TREND_NOTE.replace('—','-')),small),Spacer(1,12)])
     if summary is not None and len(summary)>8:story.append(PageBreak())
     story.extend([Paragraph('All open task records',heading),Spacer(1,6)])
     labels={'Contract Manager (Contract) (Contract)':'Contract manager','Assigned To (Procurement / Store) please put e-mail address of procurement / store officer':'Procurement assignee','Quotation Request Date:':'Requested','Approved by (Operation)':'Operations approver','Project Details:':'Project','Created On':'Opened','System Status':'Status','Work Order Type':'Type'}
