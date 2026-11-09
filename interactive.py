@@ -145,6 +145,8 @@ def linked_charts(frame, table, page):
 
 def quick_filters(frame, page):
     fields = [MANAGER] + ([TECHNICIAN] if page in {'Reactive', 'PPM', 'Corrective', 'Pro-active'} else [])
+    if page=='Reactive' and 'Category' in frame:
+        fields.append('Category')
     columns = st.columns(len(fields))
     for column, field in zip(columns, fields):
         if field not in frame:
