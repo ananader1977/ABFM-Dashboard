@@ -333,11 +333,11 @@ def build_email(group,sender,source_date,test_to=None):
         records=pd.DataFrame(person['records'])
         if records.empty:continue
         if group['kind']=='Operations':
-            case_column='Case Number (Case) (Case)'
-            if case_column not in records:records[case_column]=None
-            columns=list(records.columns);columns.remove(case_column)
-            columns.insert(columns.index('WO No.')+1 if 'WO No.' in columns else 0,case_column)
-            records=records[columns]
+            leading=['Case Number (Case) (Case)','Task Id','WO No.']
+            for column in leading:
+                if column not in records:records[column]=None
+            records=records[leading+[column for column in records if column not in leading]]
+            records=records.rename(columns=dict(zip(leading,['Case number','Task ID','WO No'])))
         records['Email sent (Dubai)']=sent_at.isoformat();records['Response due (Dubai)']=deadline.isoformat()
         name=re.sub(r'[^A-Za-z0-9_-]+','_',person['name']).strip('_') or 'Staff'
         filename=f'{stem}_{name}.xlsx'
