@@ -79,7 +79,7 @@ def capture_daily(root,now=None):
 def attach_history(groups,root,now=None):
     from escalation import TZ
     now=pd.Timestamp(now or datetime.now(TZ));now=now.tz_localize(TZ) if now.tzinfo is None else now.tz_convert(TZ)
-    dates=[str((now-timedelta(days=i)).date()) for i in range(6,-1,-1)]
+    dates=[str((now-timedelta(days=i)).date()) for i in range(4,-1,-1)]
     with history_db(root) as db:
         captured={r[0] for r in db.execute('SELECT day FROM days WHERE day BETWEEN ? AND ?',(dates[0],dates[-1]))}
         for group in groups:
@@ -121,7 +121,7 @@ def trend_summary(summary,group):
         if pair in history['cohorts']:
             total,remaining=history['cohorts'][pair];parts.append(f'Prior-day queue: {remaining}/{total} still open at daily capture')
         labels.append('\n'.join(parts))
-    summary['7-day open trend']=labels
+    summary['5-day open trend']=labels
     return summary
 
 TREND_NOTE='Daily observations at/after 08:00 Dubai; dates are MM-DD. — means no observation. Operations counts are open P1/P2 tasks older than seven days; procurement counts are open RFQs. Prior-day queue compares record IDs still open in the following daily import; absence does not prove completion. Changes require updated imports. Same-source days may be unchanged.'
@@ -131,8 +131,8 @@ def executive_trend(root,now=None):
     import altair as alt
     from escalation import TZ
     now=pd.Timestamp(now or datetime.now(TZ));now=now.tz_localize(TZ) if now.tzinfo is None else now.tz_convert(TZ)
-    start=str((now-timedelta(days=6)).date());end=str(now.date())
-    st.subheader('7-day open-task trend')
+    start=str((now-timedelta(days=4)).date());end=str(now.date())
+    st.subheader('5-day open-task trend')
     basis=st.radio('Trend basis',['Uploads','Daily reminders'],horizontal=True,key='open_trend_basis')
     if basis=='Uploads':
         from escalation import snapshot
@@ -223,7 +223,7 @@ def import_trend(root,current,now=None):
     observations=import_observations(root)
     manifest=json.loads((Path(current)/'manifest.json').read_text())
     active_stamp=manifest.get('work_order_source',{}).get('imported_at')
-    cutoff=now.normalize()-timedelta(days=6)
+    cutoff=now.normalize()-timedelta(days=4)
     visible=[o for o in observations if pd.to_datetime(o['stamp'],utc=True).tz_convert(TZ)>=cutoff]
     rows=[]
     for o in visible:
@@ -233,7 +233,7 @@ def import_trend(root,current,now=None):
         legend=alt.selection_point(fields=['Type'],bind='legend')
         chart=alt.Chart(pd.DataFrame(rows)).mark_bar().encode(x=alt.X('Upload (Dubai):N',sort=None,axis=alt.Axis(labelAngle=-25)),xOffset='Type:N',y=alt.Y('Open tasks:Q',scale=alt.Scale(zero=True)),color=alt.Color('Type:N',scale=alt.Scale(range=['#122843','#B3955B','#46845a','#b44636'])),opacity=alt.condition(legend,alt.value(1),alt.value(.15)),tooltip=['Upload (Dubai):N','Type:N','Open tasks:Q','Imported at:N']).add_params(legend).properties(height=280)
         st.altair_chart(chart,width='stretch')
-    st.caption('Actual work-order imports during the last seven days. Every upload is retained, including multiple uploads on the same day. No counts are invented for days without an upload. RFQ and agreement data are not replaced by a work-order upload.')
+    st.caption('Actual work-order imports during the last five days. Every upload is retained, including multiple uploads on the same day. No counts are invented for days without an upload. RFQ and agreement data are not replaced by a work-order upload.')
     earlier=[o for o in observations if o['stamp']!=active_stamp and pd.to_datetime(o['stamp'],utc=True)<pd.to_datetime(active_stamp,utc=True)] if active_stamp else []
     if not earlier:
         st.info('A previous work-order import is needed for a comparison.');return
