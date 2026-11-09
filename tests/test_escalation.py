@@ -25,6 +25,16 @@ class EscalationTests(unittest.TestCase):
   c=self.config();c['procurement'][0]['operations_email']='different@example.com'
   groups,issues=routes(pd.DataFrame([{MANAGER:'Manager'}]),pd.DataFrame(),c)
   self.assertFalse(groups);self.assertEqual(len(issues),1)
+ def test_procurement_leadership_cc_preserves_manager_and_test_isolation(self):
+  config=self.config();config['procurement_leadership_cc']=['d1@example.com','d2@example.com','coo@example.com','d1@example.com','buyer@example.com']
+  groups,issues=routes(pd.DataFrame(),pd.DataFrame([{ASSIGNEE:'Buyer','Reference Number':'R1'}]),config)
+  self.assertFalse(issues);self.assertEqual(len(groups),1)
+  group=groups[0]
+  self.assertEqual(group['cc'],['coo@example.com','d1@example.com','d2@example.com','procmanager@example.com'])
+  live=build_email(group,'sender@example.com','snapshot')
+  self.assertIn('d1@example.com',live['Cc']);self.assertIn('procmanager@example.com',live['Cc'])
+  test=build_email(group,'sender@example.com','snapshot',test_to='tester@example.com')
+  self.assertEqual(test['To'],'tester@example.com');self.assertIsNone(test['Cc'])
  def test_test_email_never_copies_production_recipients(self):
   g={'kind':'Operations','to':'manager@example.com','cc':['director@example.com','coo@example.com'],'records':[{'WO No.':'1'}]}
   m=build_email(g,'sender@example.com','snapshot',test_to='tester@example.com')
