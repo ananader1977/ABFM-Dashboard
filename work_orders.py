@@ -100,7 +100,7 @@ def _excel_date(value,epoch,row_number):
             if re.match(r'^\d{4}-\d{2}-\d{2}',value):result=pd.Timestamp(value)
             else:
                 result=None
-                for fmt in ['%d/%m/%Y %H:%M:%S','%d/%m/%Y %H:%M','%d/%m/%Y','%d-%m-%Y']:
+                for fmt in ['%d/%m/%Y %H:%M:%S','%d/%m/%Y %H:%M','%d/%m/%Y','%d-%m-%Y','%d/%m/%y %I:%M %p','%d/%m/%Y %I:%M %p']:
                     try:result=pd.Timestamp(datetime.strptime(value,fmt));break
                     except ValueError:pass
                 if result is None:raise ValueError()
@@ -118,6 +118,9 @@ def install_excel_replacement(source,root,sheet_name):
     root=Path(root)
     book=_excel_open(source)
     try:
+        if 'Field Mapping' in book.sheetnames:
+            from mapped_import import install_mapped_workbook
+            return install_mapped_workbook(book,root,Path(str(getattr(source,'name',source))).name,sheet_name)
         headers,rows=_excel_rows(book,sheet_name)
         schema=pa.schema([pa.field(name,pa.timestamp('ns') if name=='Created On' else pa.string()) for name in headers])
         types={name.casefold():name for name in TYPE_MAP}
@@ -153,7 +156,7 @@ def install_excel_replacement(source,root,sheet_name):
     finally:book.close()
 
 
-def install_replacement(source, root, source_name="Anas - All Work Orders.xlsx", sheet_name=None):
+def install_replacement(source, root, source_name="Anas - All Work Orders.xlsx", sheet_name=None,metadata=None,recipient_config=None):
     current = root / (root / 'current.txt').read_text().strip()
     manifest = json.loads((current / 'manifest.json').read_text())
     stage = Path(tempfile.mkdtemp(prefix='snapshot-wo-', dir=root))
@@ -209,11 +212,23 @@ def install_replacement(source, root, source_name="Anas - All Work Orders.xlsx",
         if not any(p['name'] == 'Pro-active' for p in manifest['pages']):
             manifest['pages'].insert(3, {'name':'Pro-active','visuals':[]})
         manifest['work_order_source'] = {'name':source_name,'sheet':sheet_name,'blank_priority_rows':blank_priorities,'rows':count,'counts':counts,'imported_at':datetime.now(timezone.utc).isoformat(),'technician_field':'Assigned Resource','previous_snapshot':current.name,'due_dates_available':False}
+        manifest['work_order_source'].update(metadata or {})
         manifest['imported_at'] = manifest['work_order_source']['imported_at']
         (stage / 'manifest.json').write_text(json.dumps(manifest))
         pointer = root / 'current.replacement'
         pointer.write_text(stage.name)
-        os.replace(pointer, root / 'current.txt')
+        config_path=root/'escalation_config.json'
+        previous_config=config_path.read_bytes() if recipient_config is not None and config_path.exists() else None
+        if recipient_config is not None:
+            from escalation import save_config
+            save_config(root,recipient_config)
+        try:
+            os.replace(pointer, root / 'current.txt')
+        except Exception:
+            if recipient_config is not None:
+                if previous_config is None:config_path.unlink(missing_ok=True)
+                else:config_path.write_bytes(previous_config)
+            raise
         # Import activation is independent of the derived comparison cache.
         # The executive page retries history recovery from retained snapshots.
         try:
