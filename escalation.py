@@ -136,7 +136,7 @@ def priority_mask(frame, now=None):
 
 @st.cache_data(ttl=60,max_entries=3,show_spinner=False)
 def priority_tasks(directory,manifest,now=None):
-    cols=['WO No.','Case Number (Case) (Case)','Task Id','Work Order Type','Priority','System Status','Status','Created On','Service Account','Building','Category','Assigned Resource',MANAGER]
+    cols=['WO No.','Case Number (Case) (Case)','Task Id','Work Order Type','Priority','System Status','Status','Created On','Service Account','Building','Category','Assigned Resource',MANAGER,'Source site','Source system']
     frames=[]
     for frame in scan(directory,manifest,'Reactive',cols):
         selected=frame.loc[priority_mask(frame,now)].copy()
