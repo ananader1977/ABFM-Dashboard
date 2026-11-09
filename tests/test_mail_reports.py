@@ -30,6 +30,12 @@ class MailReports(unittest.TestCase):
         self.assertEqual(live['To'],group['to']);self.assertIn('director@example.com',live['Cc'])
 
     def test_short_names_and_expired_colors(self):
+        for label in ['Open','Open work orders','Current open · Reactive / Corrective / Pro-active']:
+            for percentage in [0,1,4.99]:
+                self.assertEqual(status_style(label,percentage)[2],'green')
+            self.assertEqual(status_style(label,5)[2],'normal')
+            self.assertEqual(status_style(label,5.01)[2],'orange')
+            self.assertEqual(status_style(label,10.01)[2],'red')
         for original,short in DISPLAY_NAMES.items():self.assertEqual(display_name(original),short)
         self.assertEqual(status_style('Expired agreements',10.02)[2],'red')
         self.assertEqual(status_style('Expired agreements',7)[2],'orange')
