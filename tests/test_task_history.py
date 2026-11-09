@@ -98,3 +98,16 @@ class TaskHistoryTests(unittest.TestCase):
   rafik=next(r for r in rows if r['name']=='Rafik Jabbour');alice=next(r for r in rows if r['name']=='Alice')
   self.assertEqual((rafik['previous_open'],rafik['open'],rafik['change']),(1,2,1))
   self.assertEqual((alice['previous_open'],alice['open'],alice['change']),(1,0,-1))
+ def test_cached_comparisons_refresh_for_new_upload_and_isolate_return_values(self):
+  import shutil
+  from task_history import compare_imports
+  self.install([self.wo(1),self.wo(2)],[self.rfq('R1')],'2026-11-07T08:00:00+00:00')
+  before=self.root/'snapshot-before';shutil.copytree(self.directory,before)
+  self.install([self.wo(1),self.wo(2,'COMPLETE')],[self.rfq('R1')],'2026-11-09T08:00:00+00:00')
+  first=compare_imports(self.root,before.name,self.directory.name)
+  self.assertEqual(first.iloc[-1]['Latest open'],1)
+  first.loc[first.index[-1],'Latest open']=999
+  self.assertEqual(compare_imports(self.root,before.name,self.directory.name).iloc[-1]['Latest open'],1)
+  next_upload=self.root/'snapshot-next';shutil.copytree(self.directory,next_upload)
+  changed=pd.DataFrame([self.wo(1,'COMPLETE'),self.wo(2,'COMPLETE')]);changed.to_parquet(next_upload/'Reactive.parquet',index=False)
+  self.assertEqual(compare_imports(self.root,before.name,next_upload.name).iloc[-1]['Latest open'],0)
