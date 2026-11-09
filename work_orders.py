@@ -214,6 +214,14 @@ def install_replacement(source, root, source_name="Anas - All Work Orders.xlsx",
         pointer = root / 'current.replacement'
         pointer.write_text(stage.name)
         os.replace(pointer, root / 'current.txt')
+        # Import activation is independent of the derived comparison cache.
+        # The executive page retries history recovery from retained snapshots.
+        try:
+            from task_history import import_observations
+            import_observations(root)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception('Upload comparison cache will be rebuilt from retained snapshots.')
         return manifest['work_order_source']
     except Exception:
         shutil.rmtree(stage)
