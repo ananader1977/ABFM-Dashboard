@@ -134,7 +134,7 @@ def priority_mask(frame, now=None):
 
 
 def priority_tasks(directory,manifest,now=None):
-    cols=['WO No.','Task Id','Work Order Type','Priority','System Status','Status','Created On','Service Account','Building','Category','Assigned Resource',MANAGER]
+    cols=['WO No.','Case Number (Case) (Case)','Task Id','Work Order Type','Priority','System Status','Status','Created On','Service Account','Building','Category','Assigned Resource',MANAGER]
     frames=[]
     for frame in scan(directory,manifest,'Reactive',cols):
         selected=frame.loc[priority_mask(frame,now)].copy()
@@ -332,6 +332,12 @@ def build_email(group,sender,source_date,test_to=None):
     for person in individuals:
         records=pd.DataFrame(person['records'])
         if records.empty:continue
+        if group['kind']=='Operations':
+            case_column='Case Number (Case) (Case)'
+            if case_column not in records:records[case_column]=None
+            columns=list(records.columns);columns.remove(case_column)
+            columns.insert(columns.index('WO No.')+1 if 'WO No.' in columns else 0,case_column)
+            records=records[columns]
         records['Email sent (Dubai)']=sent_at.isoformat();records['Response due (Dubai)']=deadline.isoformat()
         name=re.sub(r'[^A-Za-z0-9_-]+','_',person['name']).strip('_') or 'Staff'
         filename=f'{stem}_{name}.xlsx'
