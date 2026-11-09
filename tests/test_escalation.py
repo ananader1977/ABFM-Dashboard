@@ -18,7 +18,12 @@ class EscalationTests(unittest.TestCase):
    tasks=priority_tasks(Path(directory),manifest,datetime(2026,11,9,8,tzinfo=TZ))
    groups,_=routes(tasks,pd.DataFrame(),self.config())
    for test_to in [None,'tester@example.com']:
-    message=build_email(groups[0],'sender@example.com','snapshot',test_to=test_to)
+    from mail_reports import pdf_bytes
+    with patch('mail_reports.pdf_bytes',wraps=pdf_bytes) as pdf:
+     message=build_email(groups[0],'sender@example.com','snapshot',test_to=test_to)
+     pdf_frame=pdf.call_args.args[1]
+     self.assertEqual(pdf_frame.columns[0],case)
+     self.assertEqual(pdf_frame.iloc[0][case],'CASE-0007')
     attachment=next(a for a in message.iter_attachments() if a.get_filename().endswith('.xlsx'))
     book=load_workbook(BytesIO(attachment.get_payload(decode=True)),read_only=True,data_only=True)
     values=list(book.active.values);headers=list(values[0])
