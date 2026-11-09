@@ -35,15 +35,16 @@ class TaskHistoryTests(unittest.TestCase):
   self.install([self.wo(1,'COMPLETE'),self.wo(2),self.wo(3)],[self.rfq('R1','Completed'),self.rfq('R2')],'2026-11-10')
   self.assertTrue(self.record(10))
   groups=self.groups(10);ops=next(g for g in groups if g['kind']=='Operations')
+  self.assertEqual(len(ops['history']['dates']),5)
   summary=trend_summary(email_summary('Operations',pd.DataFrame(ops['records'])),ops)
-  label=summary.iloc[0]['7-day open trend']
+  label=summary.iloc[0]['5-day open trend']
   self.assertIn('11-09: 2',label);self.assertIn('11-10: 2',label);self.assertIn('1/2 still open',label)
-  self.assertNotIn('Other',summary.to_string());self.assertIn('11-04: —',label)
+  self.assertNotIn('Other',summary.to_string());self.assertIn('11-06: —',label)
   proc=next(g for g in groups if g['kind']=='Procurement')
   self.assertEqual(proc['history']['cohorts'][('Buyer','Alice')],(1,0))
   message=build_email(ops,'sender@example.com','date')
   markup=message.get_body(preferencelist=('html',)).get_content()
-  self.assertIn('7-day open trend',markup);self.assertIn('<br/>',markup)
+  self.assertIn('5-day open trend',markup);self.assertIn('<br/>',markup)
   self.assertIn('1/2 still open',markup)
   self.assertEqual(sum(a.get_content_type()=='application/pdf' for a in message.iter_attachments()),1)
  def test_missing_day_is_not_zero_and_authorized_zero_row_is_kept(self):
@@ -53,8 +54,8 @@ class TaskHistoryTests(unittest.TestCase):
   attach_history([group],self.root,datetime(2026,11,11,8,tzinfo=TZ))
   summary=trend_summary(email_summary('Operations',pd.DataFrame(columns=[MANAGER,'Work Order Type'])),group)
   self.assertEqual(summary.iloc[0]['Total open'],0)
-  self.assertIn('11-10: —',summary.iloc[0]['7-day open trend']);self.assertIn('11-11: 0',summary.iloc[0]['7-day open trend'])
-  self.assertNotIn('Prior-day',summary.iloc[0]['7-day open trend'])
+  self.assertIn('11-10: —',summary.iloc[0]['5-day open trend']);self.assertIn('11-11: 0',summary.iloc[0]['5-day open trend'])
+  self.assertNotIn('Prior-day',summary.iloc[0]['5-day open trend'])
  def test_capture_before_eight_is_skipped_and_scheduler_capture_survives_reopen(self):
   self.install([self.wo(1)],[self.rfq('R1')],'2026-11-09')
   capture_daily(self.root,datetime(2026,11,9,7,59,tzinfo=TZ))
