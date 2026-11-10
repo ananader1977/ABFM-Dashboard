@@ -13,7 +13,7 @@ WORK_TYPES={'PM':'PPM','PPM':'PPM','RM':'Reactive','EM':'Reactive','CM':'Correct
 STATUSES={'CLOSE':'Completed','CLOSED':'Completed','COMP':'Completed','COMPLETE':'Completed','COMPLETED':'Completed','HISTORY':'Completed','RFI':'Completed',
  'CAN':'Canceled','CANCELED':'Canceled','CANCELLED':'Canceled','TENANT CANCELED':'Canceled','TENANT CANCELLED':'Canceled','CLOSE NEGATIVELY':'Canceled',
  'APPR':'Scheduled','APPROVED':'Scheduled','WAPPR':'Unscheduled','WAITING ON APPROVAL':'Unscheduled','ASSIGNED':'In Progress','INPRG':'In Progress','IN PROGRESS':'In Progress',
- 'TENANT NOT AVAILABLE':'Unscheduled','TENANT NOT AVAIL':'Unscheduled','QUOTATION PREPARATION':'Unscheduled','QUOTATION SUBMITTED':'Unscheduled','QPRE':'Unscheduled','QSUB':'Unscheduled','ACTIVE':'Unscheduled'}
+ 'TENANT NOT AVAILABLE':'Unscheduled','TENANT NOT AVAIL':'Unscheduled','QUOTATION PREPARATION':'Unscheduled','QUOTATION SUBMITTED':'Unscheduled','QPRE':'Unscheduled','QSUB':'Unscheduled','ACTIVE':'Unscheduled','HOLD NO ACCESS':'Unscheduled','ATTENDED':'Unscheduled','HOLD':'Unscheduled'}
 EXTRAS=['Source site','Source system','Source sheet','Source work type','Source status','Source manager','Source description','Mapping note']
 
 def clean(value):
