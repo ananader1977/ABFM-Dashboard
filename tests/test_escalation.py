@@ -97,6 +97,14 @@ class EscalationTests(unittest.TestCase):
   self.assertEqual(len(rows),1)
   self.assertEqual((rows[0]['open'],rows[0]['total'],rows[0]['PPM']),(4,5,1))
   self.assertEqual(rows[0]['aliases']['PPM'],['PPM Manager'])
+ def test_manager_all_open_records_keep_positions_across_batches(self):
+  from escalation import manager_open_records
+  a=pd.DataFrame({'Status':['ACTIVE','COMPLETE','ACTIVE'],'Work Order Type':['PPM','Reactive','Corrective'],MANAGER:['Sanjay Shirodkar']*2+['Other']})
+  b=pd.DataFrame({'Status':['ACTIVE','ASSIGNED','CANCELLED','ACTIVE'],'Work Order Type':['Reactive','Corrective','PPM','Pro-active'],MANAGER:['Sanjay Shirodkar']*4})
+  with patch('escalation.scan',return_value=iter([a,b])):
+   rows=manager_open_records(Path('.'),{},'Sanjay Shirodkar')
+  self.assertEqual(rows.index.tolist(),[0,3,4,6])
+  self.assertEqual(set(rows['Work Order Type']),{'Reactive','PPM','Corrective','Pro-active'})
  def test_gmail_app_password_spaces_and_empty_environment_override(self):
   from escalation import smtp_settings
   config={'smtp':{'host':'smtp.gmail.com','username':'sender@example.com','password':'aaaa bbbb cccc dddd','sender':'sender@example.com','port':'587'}}
