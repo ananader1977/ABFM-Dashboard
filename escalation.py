@@ -577,9 +577,44 @@ def manager_comparison(directory,manifest):
     return sorted(visible,key=lambda r:(r['name']=='(Not assigned)',-r['open'],key(r['name']))),previous_stamp
 
 
+def manager_open_records(directory,manifest,name):
+    """Retain only matching open rows, with source positions for paged exports."""
+    columns=['Status','Work Order Type',MANAGER,'Source site','Priority']
+    parts=[];offset=0
+    for frame in scan(directory,manifest,'Reactive',columns):
+        frame.index=pd.RangeIndex(offset,offset+len(frame));offset+=len(frame)
+        names=frame[MANAGER].fillna('(Not assigned)').replace('','(Not assigned)').map(display_name)
+        mask=names.eq(name) & normalized(frame['Status']).isin(OPEN) & frame['Work Order Type'].isin(MANAGER_WORK_TYPES)
+        if mask.any():parts.append(frame.loc[mask])
+    return pd.concat(parts) if parts else pd.DataFrame(columns=columns)
+
+
+def manager_records_panel(directory,manifest,name):
+    from interactive import records_panel,labels,reconcile_multiselect
+    st.subheader(name+' · All open tasks')
+    st.button('Back to manager cards',key='close_manager_records',on_click=lambda:st.session_state.pop('manager_open_selection',None))
+    selected=manager_open_records(directory,manifest,name)
+    for field in ['Work Order Type','Source site','Priority']:
+        if field in selected:
+            options=sorted(labels(selected[field]).unique().tolist())
+            filter_key='manager_records_'+name+'_'+field
+            reconcile_multiselect(filter_key,options)
+            chosen=st.multiselect(field,options,key=filter_key)
+            if chosen:selected=selected.loc[labels(selected[field]).isin(chosen)]
+    st.caption(f'{len(selected):,} open tasks · Reactive, PPM, Corrective and Pro-active. Completed and canceled records are excluded.')
+    info=manifest['tables']['Reactive']
+    first=['Case Number (Case) (Case)','Task Id','WO No.']
+    columns=[c for c in first if c in info['columns']]+[c for c in info['columns'] if c not in first]
+    records_panel(selected,Path(directory)/info['file'],'Reactive','Manager_'+name,columns)
+
+
 def review_cards(directory,manifest):
     import streamlit as st
     from visuals import styled_metric, status_style
+    selection=st.session_state.get('manager_open_selection')
+    if selection:
+        manager_records_panel(directory,manifest,selection)
+        return
     rows,previous_stamp=manager_comparison(directory,manifest)
     if previous_stamp:
         previous_date=pd.to_datetime(previous_stamp,utc=True).tz_convert(TZ).strftime('%d %b %Y, %H:%M Dubai')
@@ -594,7 +629,12 @@ def review_cards(directory,manifest):
             with col,st.container(border=True,key='compact_review_manager_'+hashlib.sha256(row['name'].encode()).hexdigest()[:12]):
                 st.markdown('**'+display_name(row['name'])+'**')
                 pct=100*row['open']/row['total'] if row['total'] else 0
-                styled_metric(st, 'Current open · Reactive / PPM / Corrective / Pro-active', f"{row['open']:,}", percentage=pct, key='manager_'+hashlib.sha256(row['name'].encode()).hexdigest()[:12])
+                color,weight,_=status_style('Open',pct)
+                link_key='manager_total_'+hashlib.sha256(row['name'].encode()).hexdigest()[:12]
+                st.markdown(f'<style>.st-key-{link_key} button p {{color:{color}!important;font-weight:{weight}!important;font-size:1.65rem!important;text-decoration:underline}}</style>',unsafe_allow_html=True)
+                with st.container(border=True,key=link_key):
+                    st.caption('Current open · Reactive / PPM / Corrective / Pro-active')
+                    st.button(f"{row['open']:,}",key=link_key+'_number',type='tertiary',help='View and download all open tasks for '+row['name'],on_click=lambda name=row['name']:st.session_state.update(manager_open_selection=name))
                 previous='—' if row['previous_open'] is None else f"{row['previous_open']:,}"
                 change='—' if row['change'] is None else f"{row['change']:+,}"
                 delta_color='#16703d' if row['change'] is not None and row['change']<0 else '#b42318' if row['change'] is not None and row['change']>0 else '#122843'
