@@ -107,8 +107,12 @@ def install_mapped_workbook(book,root,source_name,master_sheet):
                     record['Work Order Type']=kind or clean(original_type)
                     record['Category']=category_names.get(token(record.get('Category')),record.get('Category'))
                     status=STATUSES.get(token(original_status)) or STATUSES.get(token(row.get('Status')))
-                    if column == 'MR1 Report (Maximo)' and 'WAITING ON MATERIAL' in {token(original_status), token(row.get('Status'))}:
-                        status = 'Unscheduled'
+                    if column == 'MR1 Report (Maximo)':
+                        source_statuses = {token(original_status), token(row.get('Status'))}
+                        if 'CLOSE NEGATIVELY' in source_statuses:
+                            status = 'Completed'
+                        elif 'WAITING ON MATERIAL' in source_statuses:
+                            status = 'Unscheduled'
                     record['System Status']=status or clean(original_status)
                     if token(site) not in managers:raise ValueError(f'{site}: no unique line manager in Operation Data. Use the exact site worksheet name in Service Account.')
                     record['Source manager']=record.get(MANAGER)
