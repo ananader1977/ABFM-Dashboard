@@ -113,6 +113,8 @@ def install_mapped_workbook(book,root,source_name,master_sheet):
                             status = 'Completed'
                         elif 'WAITING ON MATERIAL' in source_statuses:
                             status = 'Unscheduled'
+                    if column == 'G.V.V (Maximo)' and 'CLOSE NEGATIVELY' in {token(original_status), token(row.get('Status'))}:
+                        status = 'Unscheduled'
                     record['System Status']=status or clean(original_status)
                     if token(site) not in managers:raise ValueError(f'{site}: no unique line manager in Operation Data. Use the exact site worksheet name in Service Account.')
                     record['Source manager']=record.get(MANAGER)
