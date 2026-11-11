@@ -49,7 +49,7 @@ class MappedImportTests(unittest.TestCase):
 
  def test_all_approved_mr1_statuses_are_classified_and_imported(self):
   from openpyxl import load_workbook
-  expected={'COMP':'Completed','APPR':'Scheduled','CLOSE':'Completed','CAN':'Canceled','CLOSE_NEGATIVELY':'Completed','TENANT_NOT_AVAIL':'Unscheduled','INPRG':'In Progress','TENANT_CANCELED':'Canceled','HOLD_NO_ACCESS':'Unscheduled','ATTENDED':'Unscheduled','HOLD':'Unscheduled','QPRE':'Unscheduled','Waiting On Material':'Unscheduled'}
+  expected={'COMP':'Completed','APPR':'Scheduled','CLOSE':'Completed','CAN':'Canceled','CLOSE_NEGATIVELY':'Completed','TENANT_NOT_AVAIL':'Unscheduled','INPRG':'In Progress','TENANT_CANCELED':'Canceled','HOLD_NO_ACCESS':'Unscheduled','ATTENDED':'Unscheduled','HOLD':'Unscheduled','QPRE':'Unscheduled','Waiting On Material':'Unscheduled','WMATL':'Unscheduled','PARTCOMP':'Unscheduled','PERMCOMP':'Unscheduled','WAPPR':'Unscheduled'}
   book=load_workbook(self.workbook());sheet=book['MR1']
   sheet.append(['Work Order','Reported Date','Work Type','Status Description','Priority','Site'])
   for i,(source,status) in enumerate(expected.items()):
@@ -61,6 +61,6 @@ class MappedImportTests(unittest.TestCase):
    self.assertEqual(report['merged_sources']['MR1'],len(expected))
    directory,manifest=snapshot(root);frame=pd.read_parquet(directory/manifest['tables']['Reactive']['file'])
    frame=frame.loc[frame['Source site'].eq('MR1')]
-   self.assertEqual(frame['Status'].value_counts().to_dict(),{'ACTIVE':7,'CANCELLED':2,'COMPLETE':3,'ASSIGNED':1})
+   self.assertEqual(frame['Status'].value_counts().to_dict(),{'ACTIVE':11,'CANCELLED':2,'COMPLETE':3,'ASSIGNED':1})
    self.assertEqual(set(frame[MANAGER]),{'Manager'})
    self.assertEqual(dict(zip(frame['Source status'],frame['System Status'])),expected)
