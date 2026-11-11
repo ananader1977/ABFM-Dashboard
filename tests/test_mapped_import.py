@@ -33,6 +33,7 @@ class MappedImportTests(unittest.TestCase):
    self.assertEqual(report['rows'],4);self.assertEqual(report['merged_sources']['MR1'],0)
    directory,manifest=snapshot(root);frame=pd.read_parquet(directory/manifest['tables']['Reactive']['file'])
    self.assertEqual(frame.loc[frame['Source site'].eq('Meydan GS'),'System Status'].iloc[0],'Canceled')
+   self.assertEqual(frame.loc[frame['Source site'].eq('The Gardens Co.'),'Status'].iloc[0],'ACTIVE')
    self.assertEqual(frame.loc[frame['Source site'].eq('The Gardens Co.'),MANAGER].iloc[0],'Manager')
    self.assertEqual(frame.loc[frame['WO No.'].eq('D1'),'Work Order Type'].iloc[0],'Reactive')
    self.assertEqual(frame.loc[frame['WO No.'].eq('D1'),'Category'].iloc[0],'Civil')
