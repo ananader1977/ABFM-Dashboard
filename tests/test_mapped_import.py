@@ -48,20 +48,18 @@ class MappedImportTests(unittest.TestCase):
 
  def test_all_approved_mr1_statuses_are_classified_and_imported(self):
   from openpyxl import load_workbook
-  from mapped_import import STATUSES,token
-  expected={'COMP':'Completed','APPR':'Scheduled','CLOSE':'Completed','CAN':'Canceled','CLOSE_NEGATIVELY':'Canceled','TENANT_NOT_AVAIL':'Unscheduled','INPRG':'In Progress','TENANT_CANCELED':'Canceled','HOLD_NO_ACCESS':'Unscheduled','ATTENDED':'Unscheduled','HOLD':'Unscheduled'}
+  expected={'COMP':'Completed','APPR':'Scheduled','CLOSE':'Completed','CAN':'Canceled','CLOSE_NEGATIVELY':'Completed','TENANT_NOT_AVAIL':'Unscheduled','INPRG':'In Progress','TENANT_CANCELED':'Canceled','HOLD_NO_ACCESS':'Unscheduled','ATTENDED':'Unscheduled','HOLD':'Unscheduled','QPRE':'Unscheduled','Waiting On Material':'Unscheduled'}
   book=load_workbook(self.workbook());sheet=book['MR1']
   sheet.append(['Work Order','Reported Date','Work Type','Status Description','Priority','Site'])
   for i,(source,status) in enumerate(expected.items()):
-   self.assertEqual(STATUSES[token(source)],status)
    sheet.append(['MR1-'+str(i),'2026-11-10','RM',source,2,'MR1'])
   book['Operation Data'].append(['MR1','Manager','manager@example.com','director@example.com','coo@example.com'])
   source=io.BytesIO();book.save(source);source.seek(0);source.name='mr1.xlsx'
   with tempfile.TemporaryDirectory() as d:
    root=self.root(d);report=install_excel_replacement(source,root,'Anas - All Work Orders')
-   self.assertEqual(report['merged_sources']['MR1'],11)
+   self.assertEqual(report['merged_sources']['MR1'],len(expected))
    directory,manifest=snapshot(root);frame=pd.read_parquet(directory/manifest['tables']['Reactive']['file'])
    frame=frame.loc[frame['Source site'].eq('MR1')]
-   self.assertEqual(frame['Status'].value_counts().to_dict(),{'ACTIVE':5,'CANCELLED':3,'COMPLETE':2,'ASSIGNED':1})
+   self.assertEqual(frame['Status'].value_counts().to_dict(),{'ACTIVE':7,'CANCELLED':2,'COMPLETE':3,'ASSIGNED':1})
    self.assertEqual(set(frame[MANAGER]),{'Manager'})
-   self.assertEqual(set(frame['Source status']),set(expected))
+   self.assertEqual(dict(zip(frame['Source status'],frame['System Status'])),expected)
