@@ -111,7 +111,7 @@ def install_mapped_workbook(book,root,source_name,master_sheet):
                         source_statuses = {token(original_status), token(row.get('Status'))}
                         if 'CLOSE NEGATIVELY' in source_statuses:
                             status = 'Completed'
-                        elif 'WAITING ON MATERIAL' in source_statuses:
+                        elif source_statuses & {'WAITING ON MATERIAL', 'WMATL', 'PARTCOMP', 'PERMCOMP'}:
                             status = 'Unscheduled'
                     if column == 'G.V.V (Maximo)' and 'CLOSE NEGATIVELY' in {token(original_status), token(row.get('Status'))}:
                         status = 'Completed'
