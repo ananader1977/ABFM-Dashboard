@@ -140,6 +140,19 @@ def admin_panel(user):
                     if report.get('mapping_notes'):st.info(f"{len(report['mapping_notes'])} work types were filled from an explicit PPM description; source values and mapping notes are retained.")
         except (ValueError,KeyError,TypeError,OSError) as error:
             st.error(str(error))
+    st.subheader("Refresh procurement data")
+    st.caption("In each Google Sheet, choose File → Download → Microsoft Excel (.xlsx). Upload both exports and apply them together.")
+    rfq_export = st.file_uploader("RFQ tracker Excel export", type=["xlsx"], key="rfq_excel_refresh")
+    agreement_export = st.file_uploader("Subcontractor agreements Excel export", type=["xlsx"], key="agreement_excel_refresh")
+    if st.button("Apply procurement update", disabled=rfq_export is None or agreement_export is None):
+        from work_orders import install_procurement_exports
+        try:
+            with st.spinner("Validating both procurement workbooks…"):
+                counts = install_procurement_exports(ROOT, rfq_export, agreement_export)
+            st.cache_data.clear()
+            st.success(f"Procurement data updated. RFQs: {counts['RFQ']:,}. Subcontractor agreements: {counts['Subcontractor AMC']:,}.")
+        except (ValueError, KeyError, TypeError, OSError) as error:
+            st.error(str(error))
     from escalation import admin_panel as escalation_admin
     escalation_admin(ROOT)
     with st.expander("Snapshot recovery"):
