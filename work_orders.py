@@ -340,3 +340,86 @@ def restore_requested_workspaces(root):
     except Exception:
         shutil.rmtree(stage)
         raise
+
+
+PROCUREMENT_EXPORTS = {
+    'RFQ': ('RFQ', 'Form Responses 1', ('Reference Number', 'Timestamp'), ('Status', 'Approved by (Operation)', 'Assigned To (Procurement / Store) please put e-mail address of procurement / store officer')),
+    'Subcontractor AMC': ('SubContractors Agrements', 'AMC Tracker', ('Vendor Name', 'Job Code'), ('Vendor Name', 'Job Code', 'End Date')),
+}
+
+
+def install_procurement_exports(root, rfq, agreements):
+    """Validate both Excel exports before activating a single new snapshot."""
+    from zipfile import BadZipFile
+    from openpyxl.utils.exceptions import InvalidFileException
+
+    def header(value):
+        return ' '.join(str(value or '').split()).casefold()
+
+    root = Path(root)
+    pointer = root / 'current.txt'
+    original = pointer.read_text().strip()
+    current = root / original
+    manifest = json.loads((current / 'manifest.json').read_text())
+    stage = Path(tempfile.mkdtemp(prefix='snapshot-procurement-', dir=root))
+    stamp = datetime.now(timezone.utc).isoformat()
+    counts = {}
+    try:
+        for table, source in [('RFQ', rfq), ('Subcontractor AMC', agreements)]:
+            page, tab, identifiers, required = PROCUREMENT_EXPORTS[table]
+            old = manifest['tables'][table]
+            canonical = {header(c): c for c in old['columns']}
+            try:
+                book = _excel_open(source)
+            except (BadZipFile, InvalidFileException) as exc:
+                raise ValueError(f'{table}: upload a valid Excel workbook.') from exc
+            try:
+                sheets = [s for s in book if s.title.strip() == tab]
+                if len(sheets) != 1:
+                    raise ValueError(f'{table}: expected the {tab} worksheet.')
+                sheet = sheets[0]
+                sheet.reset_dimensions()
+                rows = sheet.iter_rows(values_only=True)
+                headings = next(rows, ())
+                keys = [header(c) for c in headings]
+                if len(set(k for k in keys if k)) != sum(bool(k) for k in keys):
+                    raise ValueError(f'{table}: duplicate column headings.')
+                missing = [c for c in required if header(c) not in keys]
+                if missing or not any(header(c) in keys for c in identifiers):
+                    raise ValueError(f'{table}: missing tracker columns: {", ".join(missing or identifiers)}.')
+                columns = [canonical.get(k, str(c).strip()) for c, k in zip(headings, keys) if k]
+                positions = [i for i, k in enumerate(keys) if k]
+                identity_positions = [keys.index(header(c)) for c in identifiers if header(c) in keys]
+                values = []
+                for row in rows:
+                    if not any(i < len(row) and str(row[i] or '').strip() for i in identity_positions):
+                        continue
+                    values.append([str(row[i]) if i < len(row) and row[i] is not None else None for i in positions])
+                if not values:
+                    raise ValueError(f'{table}: no tracker records found.')
+            finally:
+                book.close()
+            frame = pd.DataFrame(values, columns=columns, dtype='string')
+            filename = 'procurement_rfq.parquet' if table == 'RFQ' else 'procurement_agreements.parquet'
+            frame.to_parquet(stage / filename, index=False)
+            manifest['tables'][table] = {'file': filename, 'rows': len(frame), 'columns': columns}
+            manifest.setdefault('page_imported_at', {})[page] = stamp
+            manifest.setdefault('procurement_sources', {})[table] = {
+                'name': Path(getattr(source, 'name', 'Excel export')).name,
+                'imported_at': stamp, 'rows': len(frame),
+            }
+            counts[table] = len(frame)
+        for table, info in manifest['tables'].items():
+            if table not in PROCUREMENT_EXPORTS and not (stage / info['file']).exists():
+                link_or_copy(current / info['file'], stage / info['file'])
+        manifest['retired_snapshot'] = original
+        (stage / 'manifest.json').write_text(json.dumps(manifest))
+        candidate = stage / 'activate.txt'
+        candidate.write_text(stage.name)
+        if pointer.read_text().strip() != original:
+            raise ValueError('Another import changed the active snapshot. Apply these files again.')
+        os.replace(candidate, pointer)
+    except Exception:
+        shutil.rmtree(stage)
+        raise
+    return counts
