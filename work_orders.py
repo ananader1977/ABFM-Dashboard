@@ -423,3 +423,41 @@ def install_procurement_exports(root, rfq, agreements):
         shutil.rmtree(stage)
         raise
     return counts
+
+TARGET_FINISH = 'Client Target Finish Time (Case) (Case)'
+TARGET_FINISH_FIELDS = (TARGET_FINISH, 'Resolve By (Case) (Case)')
+
+
+def target_finish_cutoff(columns):
+    import streamlit as st
+    from analytics import today
+
+    if not any(field in columns for field in TARGET_FINISH_FIELDS):
+        st.caption('Target finish dates are unavailable in this snapshot.')
+        return None
+    key = 'target_finish_future_widget'
+    if key not in st.session_state:
+        st.session_state[key] = st.session_state.get('target_finish_future', True)
+    future = st.checkbox('Target finish after today (Dubai)', key=key)
+    st.session_state['target_finish_future'] = future
+    return today() if future else None
+
+
+def filter_target_finish(frame, cutoff):
+    if cutoff is None:
+        return frame
+    field = next((name for name in TARGET_FINISH_FIELDS if name in frame), None)
+    if field is None:
+        return frame
+    values = frame[field].astype('string').str.strip()
+    numeric = pd.to_numeric(values, errors='coerce')
+    serial = numeric.between(1, 100000).fillna(False)
+    date_text = values.where(numeric.isna())
+    # Excel timestamps without an offset are Dubai wall-clock times.
+    explicit_offset = date_text.str.contains(r'(?:Z|[+-]\d{2}:?\d{2}|UTC|GMT)$', case=False, na=False)
+    parsed = pd.to_datetime(date_text, format='mixed', dayfirst=True, errors='coerce', utc=True)
+    local_dates = parsed.dt.tz_convert('Asia/Dubai').dt.tz_localize(None)
+    parsed = parsed.dt.tz_localize(None).where(~explicit_offset, local_dates)
+    if serial.any():
+        parsed.loc[serial] = pd.to_datetime(numeric.loc[serial].astype(float), unit='D', origin='1899-12-30')
+    return frame.loc[parsed.ge(cutoff + pd.Timedelta(days=1)).fillna(False)]
