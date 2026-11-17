@@ -435,12 +435,12 @@ def target_finish_cutoff(columns):
     if not any(field in columns for field in TARGET_FINISH_FIELDS):
         st.caption('Target finish dates are unavailable in this snapshot.')
         return None
-    key = 'target_finish_future_widget'
+    key = 'target_finish_past_widget'
     if key not in st.session_state:
-        st.session_state[key] = st.session_state.get('target_finish_future', True)
-    future = st.checkbox('Target finish after today (Dubai)', key=key)
-    st.session_state['target_finish_future'] = future
-    return today() if future else None
+        st.session_state[key] = st.session_state.get('target_finish_past', True)
+    past = st.checkbox('Target finish before today', key=key)
+    st.session_state['target_finish_past'] = past
+    return today() if past else None
 
 
 def filter_target_finish(frame, cutoff):
@@ -460,4 +460,4 @@ def filter_target_finish(frame, cutoff):
     parsed = parsed.dt.tz_localize(None).where(~explicit_offset, local_dates)
     if serial.any():
         parsed.loc[serial] = pd.to_datetime(numeric.loc[serial].astype(float), unit='D', origin='1899-12-30')
-    return frame.loc[parsed.ge(cutoff + pd.Timedelta(days=1)).fillna(False)]
+    return frame.loc[parsed.lt(cutoff).fillna(False)]
