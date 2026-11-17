@@ -15,7 +15,8 @@ from analytics import PAGE_TABLES, TASK_TYPES, aggregate, dates, field_reference
 from brand import LOGO
 from security import authenticate, connect, current_user, save_user, rename_user, browser_session_user, revoke_browser_session, SESSION_COOKIE
 from interactive import linked_charts, quick_filters, records_panel, labels, MANAGER_FIELDS, reconcile_multiselect, refresh_work_order_filters
-from work_orders import install_excel_replacement, excel_sheet_names, preview_excel
+from work_orders import (install_excel_replacement, excel_sheet_names, preview_excel,
+                         TARGET_FINISH_FIELDS, target_finish_cutoff, filter_target_finish)
 from measures import measure
 from data_access import load_table, load_rows, display_columns, source_visuals, SOURCE_VISUAL_TYPES
 from visuals import CSS, page_header, polish, overview, styled_metric
@@ -379,8 +380,14 @@ def run():
     chosen = st.session_state.get(f"source_chart_{page_name}_{table}")
     visual = next((c for c in choices if c['name'] == chosen), choices[0] if choices else None)
     projection = display_columns(info['columns'], table, view_requested, st.session_state.get(f"fields_{table}", []), visual)
+    cutoff = None
+    if page_name in TASK_TYPES:
+        cutoff = target_finish_cutoff(info['columns'])
+        if projection is not None:
+            projection = list(dict.fromkeys([*projection, *(c for c in TARGET_FINISH_FIELDS if c in info['columns'])]))
     frame = read_table(str(path), path.stat().st_mtime_ns, TASK_TYPES.get(page_name), projection)
     tab_total = len(frame)
+    frame = filter_target_finish(frame, cutoff)
     scope = st.session_state.get('executive_scope')
     if scope and scope.get('page') == page_name:
         st.caption('Executive Summary selection · showing matching action records')
