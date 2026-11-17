@@ -136,10 +136,13 @@ def priority_mask(frame, now=None):
 
 
 @st.cache_data(ttl=60,max_entries=3,show_spinner=False)
-def priority_tasks(directory,manifest,now=None):
+def priority_tasks(directory,manifest,now=None,cutoff=None):
     cols=['WO No.','Case Number (Case) (Case)','Task Id','Work Order Type','Priority','System Status','Status','Created On','Service Account','Building','Category','Assigned Resource',MANAGER,'Source site','Source system']
+    from work_orders import TARGET_FINISH_FIELDS, filter_target_finish
+    if cutoff is not None: cols.extend(TARGET_FINISH_FIELDS)
     frames=[]
     for frame in scan(directory,manifest,'Reactive',cols):
+        frame = filter_target_finish(frame, cutoff)
         selected=frame.loc[priority_mask(frame,now)].copy()
         if not selected.empty:frames.append(selected)
     if not frames:return pd.DataFrame(columns=cols+['Age (days)'])
@@ -151,11 +154,13 @@ def priority_tasks(directory,manifest,now=None):
 
 
 @st.cache_data(ttl=300,max_entries=6,show_spinner=False)
-def manager_counts(directory,manifest):
+def manager_counts(directory,manifest,cutoff=None):
     counts={};totals={};aliases={}
     cols=['Work Order Type','Status',MANAGER]
-    for frame in scan(directory,manifest,'Reactive',cols):
+    from work_orders import TARGET_FINISH_FIELDS, filter_target_finish
+    for frame in scan(directory,manifest,'Reactive',cols+list(TARGET_FINISH_FIELDS) if cutoff is not None else cols):
         if not set(cols)<=set(frame):continue
+        frame = filter_target_finish(frame, cutoff)
         frame=frame.loc[frame['Work Order Type'].isin(MANAGER_WORK_TYPES)].copy()
         frame['_manager_variant']=frame[MANAGER].fillna('(Not assigned)').replace('','(Not assigned)')
         frame[MANAGER]=frame['_manager_variant'].map(lambda name: 'Rafik Jabbour' if key(name).lstrip('#').strip()=='rafik jabbour' else display_name(name))
@@ -531,12 +536,12 @@ def start_scheduler(root):
     threading.Thread(target=loop,name='abfm-daily-escalation',daemon=True).start()
 
 
-def executive_panels(directory,manifest):
+def executive_panels(directory,manifest,cutoff=None):
     import streamlit as st
     from interactive import excel_bytes
     from task_history import executive_trend
     executive_trend(Path(directory).parent)
-    tasks=priority_tasks(directory,manifest)
+    tasks=priority_tasks(directory,manifest,cutoff=cutoff)
     st.subheader(f'Open P1 / P2 tasks older than seven days · {len(tasks):,} open tasks')
     st.caption('All four work-order types. Scheduled, In Progress and Unscheduled are open; completed and cancelled tasks are excluded. Age is measured from Created On in Dubai time, strictly greater than seven days.')
     display=tasks.drop(columns=['Status'],errors='ignore')
@@ -556,11 +561,11 @@ def agreement_stats(directory,manifest):
     return {'total':total,'expired':expired,'percentage':100*expired/total if total else 0}
 
 
-def manager_comparison(directory,manifest):
+def manager_comparison(directory,manifest,cutoff=None):
     from task_history import import_observations
-    current=manager_counts(directory,manifest)
+    current=manager_counts(directory,manifest,cutoff)
     stamp=manifest.get('work_order_source',{}).get('imported_at')
-    earlier=[o for o in import_observations(Path(directory).parent) if stamp and pd.to_datetime(o['stamp'],utc=True)<pd.to_datetime(stamp,utc=True)]
+    earlier=[o for o in import_observations(Path(directory).parent) if cutoff is None and stamp and pd.to_datetime(o['stamp'],utc=True)<pd.to_datetime(stamp,utc=True)]
     previous={};previous_stamp=None
     if earlier:
         baseline=earlier[-1];previous_stamp=baseline['stamp']
@@ -577,23 +582,26 @@ def manager_comparison(directory,manifest):
     return sorted(visible,key=lambda r:(r['name']=='(Not assigned)',-r['open'],key(r['name']))),previous_stamp
 
 
-def manager_open_records(directory,manifest,name):
+def manager_open_records(directory,manifest,name,cutoff=None):
     """Retain only matching open rows, with source positions for paged exports."""
     columns=['Status','Work Order Type',MANAGER,'Source site','Priority']
+    from work_orders import TARGET_FINISH_FIELDS, filter_target_finish
+    if cutoff is not None: columns.extend(TARGET_FINISH_FIELDS)
     parts=[];offset=0
     for frame in scan(directory,manifest,'Reactive',columns):
         frame.index=pd.RangeIndex(offset,offset+len(frame));offset+=len(frame)
+        frame = filter_target_finish(frame, cutoff)
         names=frame[MANAGER].fillna('(Not assigned)').replace('','(Not assigned)').map(display_name)
         mask=names.eq(name) & normalized(frame['Status']).isin(OPEN) & frame['Work Order Type'].isin(MANAGER_WORK_TYPES)
         if mask.any():parts.append(frame.loc[mask])
     return pd.concat(parts) if parts else pd.DataFrame(columns=columns)
 
 
-def manager_records_panel(directory,manifest,name):
+def manager_records_panel(directory,manifest,name,cutoff=None):
     from interactive import records_panel,labels,reconcile_multiselect
     st.subheader(name+' · All open tasks')
     st.button('Back to manager cards',key='close_manager_records',on_click=lambda:st.session_state.pop('manager_open_selection',None))
-    selected=manager_open_records(directory,manifest,name)
+    selected=manager_open_records(directory,manifest,name,cutoff)
     for field in ['Work Order Type','Source site','Priority']:
         if field in selected:
             options=sorted(labels(selected[field]).unique().tolist())
@@ -608,14 +616,14 @@ def manager_records_panel(directory,manifest,name):
     records_panel(selected,Path(directory)/info['file'],'Reactive','Manager_'+name,columns)
 
 
-def review_cards(directory,manifest):
+def review_cards(directory,manifest,cutoff=None):
     import streamlit as st
     from visuals import styled_metric, status_style
     selection=st.session_state.get('manager_open_selection')
     if selection:
-        manager_records_panel(directory,manifest,selection)
+        manager_records_panel(directory,manifest,selection,cutoff)
         return
-    rows,previous_stamp=manager_comparison(directory,manifest)
+    rows,previous_stamp=manager_comparison(directory,manifest,cutoff)
     if previous_stamp:
         previous_date=pd.to_datetime(previous_stamp,utc=True).tz_convert(TZ).strftime('%d %b %Y, %H:%M Dubai')
         current_date=pd.to_datetime(manifest['work_order_source']['imported_at'],utc=True).tz_convert(TZ).strftime('%d %b %Y, %H:%M Dubai')
