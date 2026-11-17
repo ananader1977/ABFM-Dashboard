@@ -62,7 +62,8 @@ def batches(directory, manifest, table, columns):
 
 
 @st.cache_data(ttl=300,max_entries=1,show_spinner=False)
-def collect(directory_name, manifest_modified, pages):
+def collect(directory_name, manifest_modified, pages, cutoff=None):
+    from work_orders import TARGET_FINISH_FIELDS, filter_target_finish
     directory=Path(directory_name)
     manifest=json.loads((directory/'manifest.json').read_text())
     totals={page:{'Total work orders':0,'Completed':0,'Open':0,'Cancelled':0,'Other status':0,'Overdue open':0,'Open without due date':0} for page in TASK_TYPES}
@@ -71,7 +72,8 @@ def collect(directory_name, manifest_modified, pages):
     due_available=False
     if 'Reactive' in manifest['tables']:
         due_available='Task Due Date' in manifest['tables']['Reactive']['columns']
-        for frame in batches(directory,manifest,'Reactive',['Task Type','Status','Task Due Date']):
+        for frame in batches(directory,manifest,'Reactive',['Task Type','Status','Task Due Date',*TARGET_FINISH_FIELDS]):
+            frame = filter_target_finish(frame, cutoff)
             kinds=normalized(frame[resolve(frame,'Task Type')])
             for page,kind in TASK_TYPES.items():
                 subset=frame.loc[kinds.eq(kind)]
@@ -121,8 +123,10 @@ def clear_scope():
 
 def render(directory,manifest,pages):
     page_header(PAGE,manifest.get('work_order_source', {}).get('imported_at', manifest['imported_at']))
+    from work_orders import target_finish_cutoff
+    cutoff = target_finish_cutoff(manifest['tables'].get('Reactive', {}).get('columns', []))
     with st.spinner('Preparing the executive overview…'):
-        data=collect(str(directory),(directory/'manifest.json').stat().st_mtime_ns,tuple(pages))
+        data=collect(str(directory),(directory/'manifest.json').stat().st_mtime_ns,tuple(pages),cutoff)
     stats=data['work_orders']
     columns=st.columns(4)
     if manifest.get('work_order_source'):
@@ -144,7 +148,7 @@ def render(directory,manifest,pages):
     st.caption('Each card shows its own rule. These counts are not added into a global total because workspaces can overlap and use different record units.')
     from escalation import review_cards
     if manifest.get('work_order_source'):
-        review_cards(directory, manifest)
+        review_cards(directory, manifest, cutoff)
     else:
         for row in data['rows']:
             st.metric(row['page'], '—' if row['count'] is None else f"{row['count']:,}")
@@ -163,7 +167,9 @@ def render(directory,manifest,pages):
             key = 'summary_status_' + page
             chart(pd.DataFrame(rows), key, lambda k=key,p=page: status_click(k,p), page)
     from escalation import executive_panels
-    executive_panels(directory, manifest)
+    if cutoff is not None:
+        st.caption('Historical upload comparisons and procurement counts cover their full datasets.')
+    executive_panels(directory, manifest, cutoff)
     left, right = st.columns(2)
     with left:
         included = [r for r in data['rows'] if r['count'] is not None]
