@@ -425,7 +425,8 @@ def install_procurement_exports(root, rfq, agreements):
     return counts
 
 TARGET_FINISH = 'Client Target Finish Time (Case) (Case)'
-TARGET_FINISH_FIELDS = (TARGET_FINISH, 'Resolve By (Case) (Case)')
+FIRST_RESPONSE_BY = 'First Response By (Case) (Case)'
+TARGET_FINISH_FIELDS = (TARGET_FINISH, 'Resolve By (Case) (Case)', FIRST_RESPONSE_BY)
 
 
 def target_finish_cutoff(columns):
@@ -443,13 +444,8 @@ def target_finish_cutoff(columns):
     return today() if past else None
 
 
-def filter_target_finish(frame, cutoff):
-    if cutoff is None:
-        return frame
-    field = next((name for name in TARGET_FINISH_FIELDS if name in frame), None)
-    if field is None:
-        return frame
-    values = frame[field].astype('string').str.strip()
+def _target_date_values(values):
+    values = values.astype('string').str.strip()
     numeric = pd.to_numeric(values, errors='coerce')
     serial = numeric.between(1, 100000).fillna(False)
     date_text = values.where(numeric.isna())
@@ -460,4 +456,19 @@ def filter_target_finish(frame, cutoff):
     parsed = parsed.dt.tz_localize(None).where(~explicit_offset, local_dates)
     if serial.any():
         parsed.loc[serial] = pd.to_datetime(numeric.loc[serial].astype(float), unit='D', origin='1899-12-30')
-    return frame.loc[parsed.lt(cutoff).fillna(False)]
+    return parsed
+
+
+def filter_target_finish(frame, cutoff):
+    if cutoff is None:
+        return frame
+    field = next((name for name in TARGET_FINISH_FIELDS[:2] if name in frame), None)
+    if field is None and FIRST_RESPONSE_BY not in frame:
+        return frame
+    values = frame[field].astype('string').str.strip() if field else pd.Series(pd.NA, index=frame.index, dtype='string')
+    target = _target_date_values(values)
+    blank = values.isna() | values.eq('').fillna(False)
+    if FIRST_RESPONSE_BY in frame and blank.any():
+        response = _target_date_values(frame.loc[blank, FIRST_RESPONSE_BY])
+        target.loc[blank] = response + pd.Timedelta(days=30)
+    return frame.loc[target.lt(cutoff).fillna(False)]
