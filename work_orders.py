@@ -471,7 +471,7 @@ def filter_target_finish(frame, cutoff):
     kind_field = next((name for name in ('Work Order Type', 'Task Type') if name in frame), None)
     if FIRST_RESPONSE_BY in frame and kind_field:
         kind = frame[kind_field].astype('string').str.strip().str.upper()
-        fallback = blank & kind.isin({'REACTIVE', 'BREAKDOWN', 'PPM'})
+        fallback = blank & kind.isin({'REACTIVE', 'BREAKDOWN', 'PPM', 'CORRECTIVE', 'SCHEDULEDTASK', 'PRO-ACTIVE', 'PROACTIVE'})
         if fallback.any():
             response = _target_date_values(frame.loc[fallback, FIRST_RESPONSE_BY])
             target.loc[fallback] = response + pd.Timedelta(days=30)
