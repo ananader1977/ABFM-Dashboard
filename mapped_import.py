@@ -56,14 +56,14 @@ def site_managers(book):
     return {site:next(iter(managers.values())) for site,managers in people.items() if len(managers)==1}
 
 def install_mapped_workbook(book,root,source_name,master_sheet):
-    from work_orders import _excel_rows,_excel_date,install_replacement,TYPE_MAP,STATUS_MAP
+    from work_orders import _excel_rows,_excel_date,install_replacement,TYPE_MAP,STATUS_MAP,TARGET_FINISH
     root=Path(root);headers,master_rows=_excel_rows(book,master_sheet)
     mapping_sheet=book['Field Mapping'];mapping_sheet.reset_dimensions();mapping_rows=mapping_sheet.iter_rows(values_only=True);mapping_headers=[clean(v) for v in next(mapping_rows,())]
     if not mapping_headers or mapping_headers[0]!='Dynamic':raise ValueError('Field Mapping must start with the Dynamic master-field column.')
     mapping={clean(row[0]):{column:clean(value) for column,value in zip(mapping_headers[1:],row[1:])} for row in mapping_rows if row and clean(row[0])}
-    if set(headers)-set(mapping):raise ValueError('Field Mapping is missing master fields: '+', '.join(sorted(set(headers)-set(mapping))))
+    if set(headers)-set(mapping)-{TARGET_FINISH}:raise ValueError('Field Mapping is missing master fields: '+', '.join(sorted(set(headers)-set(mapping)-{TARGET_FINISH})))
     recipient_config=roster_candidate(book,root);managers=site_managers(book);sources=source_sheets(book)
-    fields=headers+EXTRAS;schema=pa.schema([pa.field(name,pa.timestamp('ns') if name=='Created On' else pa.string()) for name in fields])
+    fields=list(dict.fromkeys(headers+[TARGET_FINISH]+EXTRAS));schema=pa.schema([pa.field(name,pa.timestamp('ns') if name=='Created On' else pa.string()) for name in fields])
     counts={};status_counts={};notes=[];batch=[];manager_backfills=0;category_names={}
     with tempfile.TemporaryDirectory(prefix='mapped-workbook-',dir=root) as temporary:
         prepared=Path(temporary)/'merged.parquet'
@@ -86,6 +86,8 @@ def install_mapped_workbook(book,root,source_name,master_sheet):
                     record['Mapping note']='Blank manager filled from unique Operation Data service-account mapping.'
                     manager_backfills+=1
                 if isinstance(record.get('WO No.'),(int,float)):record['WO No.']=str(int(record['WO No.']))
+                if TARGET_FINISH not in record:
+                    record[TARGET_FINISH]=record.get('Resolve By (Case) (Case)')
                 append(record,master_sheet,row_number)
             for column,site in sources.items():
                 if site is None:continue
@@ -95,10 +97,12 @@ def install_mapped_workbook(book,root,source_name,master_sheet):
                     if not any(clean(v) for v in values):continue
                     row=dict(zip(source_headers,values));record={}
                     for field in headers:
-                        origin=mapping[field].get(column,'')
+                        origin=mapping.get(field,{}).get(column,'')
                         if token(origin) in {'','N/A'}:record[field]=None;continue
                         actual=origin if origin in row else MRI_HEADERS.get(origin,origin) if column=='DP World (MRI)' else origin
                         record[field]=row.get(actual)
+                    target_header = 'Target Fix Date' if column == 'DP World (MRI)' else 'Maximum Resolution'
+                    record[TARGET_FINISH] = record.get(TARGET_FINISH) or row.get(target_header)
                     original_type=record.get('Work Order Type');original_status=record.get('System Status')
                     kind=WORK_TYPES.get(token(original_type));note=''
                     if not kind and not clean(original_type) and re.search(r'\bPPM\b',token(row.get('Description'))):
