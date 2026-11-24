@@ -61,6 +61,8 @@ def install_mapped_workbook(book,root,source_name,master_sheet):
     mapping_sheet=book['Field Mapping'];mapping_sheet.reset_dimensions();mapping_rows=mapping_sheet.iter_rows(values_only=True);mapping_headers=[clean(v) for v in next(mapping_rows,())]
     if not mapping_headers or mapping_headers[0]!='Dynamic':raise ValueError('Field Mapping must start with the Dynamic master-field column.')
     mapping={clean(row[0]):{column:clean(value) for column,value in zip(mapping_headers[1:],row[1:])} for row in mapping_rows if row and clean(row[0])}
+    if 'Created On' not in mapping and 'Task Date' in mapping:
+        mapping['Created On'] = dict(mapping['Task Date'])
     if set(headers)-set(mapping)-{TARGET_FINISH, 'Finish Date', 'Create Date', *MASTER_DATE_FALLBACKS}:raise ValueError('Field Mapping is missing master fields: '+', '.join(sorted(set(headers)-set(mapping)-{TARGET_FINISH, 'Finish Date', 'Create Date', *MASTER_DATE_FALLBACKS})))
     recipient_config=roster_candidate(book,root);managers=site_managers(book);sources=source_sheets(book)
     fields=list(dict.fromkeys(headers+[TARGET_FINISH]+list(MASTER_DATE_FALLBACKS)+EXTRAS));schema=pa.schema([pa.field(name,pa.timestamp('ns') if name=='Created On' else pa.string()) for name in fields])
