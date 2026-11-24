@@ -122,6 +122,9 @@ def install_excel_replacement(source,root,sheet_name):
             from mapped_import import install_mapped_workbook
             return install_mapped_workbook(book,root,Path(str(getattr(source,'name',source))).name,sheet_name)
         headers,rows=_excel_rows(book,sheet_name)
+        source_headers = list(headers)
+        if sheet_name == 'Anas - All Work Orders' and 'Finish Date' in headers and TARGET_FINISH not in headers:
+            headers.append(TARGET_FINISH)
         schema=pa.schema([pa.field(name,pa.timestamp('ns') if name=='Created On' else pa.string()) for name in headers])
         types={name.casefold():name for name in TYPE_MAP}
         statuses={name.casefold():name for name in STATUS_MAP}
@@ -131,7 +134,7 @@ def install_excel_replacement(source,root,sheet_name):
                 batch=[]
                 for row_number,values in enumerate(rows,start=2):
                     if not any(value is not None and str(value).strip() for value in values):continue
-                    if any(value is not None and str(value).strip() for value in values[len(headers):]):raise ValueError(f'Excel row {row_number}: values extend beyond the column headings.')
+                    if any(value is not None and str(value).strip() for value in values[len(source_headers):]):raise ValueError(f'Excel row {row_number}: values extend beyond the column headings.')
                     record={}
                     for i,name in enumerate(headers):
                         value=values[i] if i<len(values) else None
@@ -142,6 +145,8 @@ def install_excel_replacement(source,root,sheet_name):
                             record[name]=str(int(value))
                         elif isinstance(value,(date,datetime)):record[name]=value.isoformat()
                         else:record[name]=str(value).strip() or None
+                    if sheet_name == 'Anas - All Work Orders' and not record.get(TARGET_FINISH) and record.get('Finish Date'):
+                        record[TARGET_FINISH] = record['Finish Date']
                     kind=types.get(str(record['Work Order Type']).casefold())
                     if not kind:raise ValueError(f'Excel row {row_number}: Work Order Type must be Reactive, PPM, Corrective or Pro-active.')
                     status=statuses.get(str(record['System Status']).casefold())
