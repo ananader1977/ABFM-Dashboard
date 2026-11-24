@@ -56,14 +56,14 @@ def site_managers(book):
     return {site:next(iter(managers.values())) for site,managers in people.items() if len(managers)==1}
 
 def install_mapped_workbook(book,root,source_name,master_sheet):
-    from work_orders import _excel_rows,_excel_date,install_replacement,TYPE_MAP,STATUS_MAP,TARGET_FINISH
+    from work_orders import _excel_rows,_excel_date,install_replacement,TYPE_MAP,STATUS_MAP,TARGET_FINISH,MASTER_DATE_FALLBACKS,fill_master_dates
     root=Path(root);headers,master_rows=_excel_rows(book,master_sheet)
     mapping_sheet=book['Field Mapping'];mapping_sheet.reset_dimensions();mapping_rows=mapping_sheet.iter_rows(values_only=True);mapping_headers=[clean(v) for v in next(mapping_rows,())]
     if not mapping_headers or mapping_headers[0]!='Dynamic':raise ValueError('Field Mapping must start with the Dynamic master-field column.')
     mapping={clean(row[0]):{column:clean(value) for column,value in zip(mapping_headers[1:],row[1:])} for row in mapping_rows if row and clean(row[0])}
-    if set(headers)-set(mapping)-{TARGET_FINISH, 'Finish Date'}:raise ValueError('Field Mapping is missing master fields: '+', '.join(sorted(set(headers)-set(mapping)-{TARGET_FINISH, 'Finish Date'})))
+    if set(headers)-set(mapping)-{TARGET_FINISH, 'Finish Date', 'Create Date', *MASTER_DATE_FALLBACKS}:raise ValueError('Field Mapping is missing master fields: '+', '.join(sorted(set(headers)-set(mapping)-{TARGET_FINISH, 'Finish Date', 'Create Date', *MASTER_DATE_FALLBACKS})))
     recipient_config=roster_candidate(book,root);managers=site_managers(book);sources=source_sheets(book)
-    fields=list(dict.fromkeys(headers+[TARGET_FINISH]+EXTRAS));schema=pa.schema([pa.field(name,pa.timestamp('ns') if name=='Created On' else pa.string()) for name in fields])
+    fields=list(dict.fromkeys(headers+[TARGET_FINISH]+list(MASTER_DATE_FALLBACKS)+EXTRAS));schema=pa.schema([pa.field(name,pa.timestamp('ns') if name=='Created On' else pa.string()) for name in fields])
     counts={};status_counts={};notes=[];batch=[];manager_backfills=0;category_names={}
     with tempfile.TemporaryDirectory(prefix='mapped-workbook-',dir=root) as temporary:
         prepared=Path(temporary)/'merged.parquet'
@@ -90,6 +90,7 @@ def install_mapped_workbook(book,root,source_name,master_sheet):
                     record[TARGET_FINISH] = record['Finish Date']
                 if TARGET_FINISH not in record:
                     record[TARGET_FINISH]=record.get('Resolve By (Case) (Case)')
+                fill_master_dates(record, master_sheet)
                 append(record,master_sheet,row_number)
             for column,site in sources.items():
                 if site is None:continue
