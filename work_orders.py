@@ -125,6 +125,10 @@ def install_excel_replacement(source,root,sheet_name):
         source_headers = list(headers)
         if sheet_name == 'Anas - All Work Orders' and 'Finish Date' in headers and TARGET_FINISH not in headers:
             headers.append(TARGET_FINISH)
+        if sheet_name == 'Anas - All Work Orders':
+            for destination, source_field in MASTER_DATE_FALLBACKS.items():
+                if source_field in headers and destination not in headers:
+                    headers.append(destination)
         schema=pa.schema([pa.field(name,pa.timestamp('ns') if name=='Created On' else pa.string()) for name in headers])
         types={name.casefold():name for name in TYPE_MAP}
         statuses={name.casefold():name for name in STATUS_MAP}
@@ -147,6 +151,7 @@ def install_excel_replacement(source,root,sheet_name):
                         else:record[name]=str(value).strip() or None
                     if sheet_name == 'Anas - All Work Orders' and not record.get(TARGET_FINISH) and record.get('Finish Date'):
                         record[TARGET_FINISH] = record['Finish Date']
+                    fill_master_dates(record, sheet_name)
                     kind=types.get(str(record['Work Order Type']).casefold())
                     if not kind:raise ValueError(f'Excel row {row_number}: Work Order Type must be Reactive, PPM, Corrective or Pro-active.')
                     status=statuses.get(str(record['System Status']).casefold())
@@ -481,3 +486,19 @@ def filter_target_finish(frame, cutoff):
             response = _target_date_values(frame.loc[fallback, FIRST_RESPONSE_BY])
             target.loc[fallback] = response + pd.Timedelta(days=30)
     return frame.loc[target.lt(cutoff).fillna(False)]
+
+
+MASTER_DATE_FALLBACKS = {
+    'Task Date': 'Create Date',
+    'Agreed Completion Time': TARGET_FINISH,
+}
+
+
+def fill_master_dates(record, sheet_name):
+    if sheet_name != 'Anas - All Work Orders':
+        return
+    for destination, source in MASTER_DATE_FALLBACKS.items():
+        existing = record.get(destination)
+        fallback = record.get(source)
+        if (existing is None or not str(existing).strip()) and fallback is not None and str(fallback).strip():
+            record[destination] = fallback
